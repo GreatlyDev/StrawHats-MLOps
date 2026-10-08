@@ -10,7 +10,7 @@ A model operations dashboard for registering ML models, testing inference, prepa
 
 | Member | Responsibility |
 | --- | --- |
-| GreatAnthony Umukoro ([GreatlyDev](https://github.com/GreatlyDev)) | UI, integration, deployment and release decisions |
+| Great-Anthony Umukoro ([GreatlyDev](https://github.com/GreatlyDev)) | UI, integration, deployment and release decisions |
 | Mikayla Brown | Backend development |
 | Mahki Titus | Backend development |
 
@@ -122,7 +122,7 @@ For a future Vercel frontend project, select `frontend` as the root directory, V
 
 ## Contributing
 
-Create feature branches from `main` and propose changes through pull requests. **Keep feature branches after merging.** GreatAnthony coordinates frontend changes, integration, and releases.
+Create feature branches from `main` and propose changes through pull requests. **Keep feature branches after merging.** Great-Anthony Umukoro coordinates frontend changes, integration, and releases.
 
 Read the [API contract](docs/api-contract.md) before changing backend interfaces. GitHub Actions runs backend tests/lint and frontend tests/build on pushes and pull requests. Use the verification commands above before opening a PR.
 
