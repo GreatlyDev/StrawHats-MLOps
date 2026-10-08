@@ -10,7 +10,7 @@ A model operations dashboard for registering ML models, testing inference, prepa
 
 | Member | Responsibility |
 | --- | --- |
-| GreatAnthony Umukoro ([GreatlyDev](https://github.com/GreatlyDev)) | UI, integration, deployment and release decisions |
+| Great-Anthony Umukoro ([GreatlyDev](https://github.com/GreatlyDev)) | UI, integration, deployment and release decisions |
 | Mikayla Brown | Backend development |
 | Mahki Titus | Backend development |
 
@@ -18,7 +18,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 
 ## Features in this release
 
-- Light responsive React dashboard with Overview, Models, Deployment previews, Assistant, and Activity.
+- One Piece-inspired responsive React dashboard with parchment panels, nautical branding, and Overview, Models, Deployment previews, Assistant, and Activity.
 - Persistent SQLite model/container registry and timeline.
 - Reproducible Iris classifier with held-out evaluation and real local predictions.
 - Kubernetes Namespace, Deployment, and Service YAML previews with selected resources, replicas, probes, and nonroot settings; copy/download support.
@@ -122,7 +122,7 @@ For a future Vercel frontend project, select `frontend` as the root directory, V
 
 ## Contributing
 
-Create feature branches from `main` and propose changes through pull requests. **Keep feature branches after merging.** GreatAnthony coordinates frontend changes, integration, and releases.
+Create feature branches from `main` and propose changes through pull requests. **Keep feature branches after merging.** Great-Anthony Umukoro coordinates frontend changes, integration, and releases.
 
 Read the [API contract](docs/api-contract.md) before changing backend interfaces. GitHub Actions runs backend tests/lint and frontend tests/build on pushes and pull requests. Use the verification commands above before opening a PR.
 
