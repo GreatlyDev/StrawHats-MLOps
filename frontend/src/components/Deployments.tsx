@@ -97,87 +97,106 @@ export default function Deployments({
           </div>
           {models.length ? (
             <form onSubmit={submit}>
-              <label className="field">
-                Registered model
-                <select
-                  value={model.id}
-                  onChange={(e) => setModelId(e.target.value)}
-                >
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} · v{m.version}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                Service name
-                <input
-                  name="name"
-                  required
-                  defaultValue="model-service"
-                  pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?"
-                  maxLength={63}
-                  title="Lowercase letters, digits and hyphens; start and end with a letter or digit."
-                />
-              </label>
-              <label className="field">
-                Namespace
-                <input
-                  name="namespace"
-                  required
-                  defaultValue="strawhats"
-                  pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?"
-                  maxLength={63}
-                />
-              </label>
-              <label className="field">
-                Serving container image
-                <input
-                  key={model.id}
-                  name="image"
-                  required
-                  defaultValue={model.image || ''}
-                  placeholder="ghcr.io/your-team/model:v1"
-                />
-                <small>
-                  A runnable HTTP serving image is required, including for the
-                  local example.
-                </small>
-              </label>
-              <div className="resource-grid">
+              <fieldset className="form-section">
+                <legend>
+                  <span>01</span> Model & image
+                </legend>
                 <label className="field">
-                  Replicas
-                  <input
-                    name="replicas"
-                    type="number"
-                    required
-                    min="1"
-                    max="100"
-                    defaultValue="2"
-                  />
+                  Registered model
+                  <select
+                    value={model.id}
+                    onChange={(e) => setModelId(e.target.value)}
+                  >
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} · v{m.version}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="field">
-                  CPU (mCPU)
+                  Serving container image
                   <input
-                    name="cpu_millicores"
-                    type="number"
+                    key={model.id}
+                    name="image"
                     required
-                    min="1"
-                    defaultValue="250"
+                    defaultValue={model.image || ''}
+                    placeholder="ghcr.io/your-team/model:v1"
                   />
+                  <small>
+                    A runnable HTTP serving image is required, including for the
+                    local example.
+                  </small>
                 </label>
-                <label className="field">
-                  Memory (MiB)
-                  <input
-                    name="memory_mebibytes"
-                    type="number"
-                    required
-                    min="1"
-                    defaultValue="256"
-                  />
-                </label>
-              </div>
+              </fieldset>
+              <fieldset className="form-section">
+                <legend>
+                  <span>02</span> Service identity
+                </legend>
+                <div className="feature-grid">
+                  <label className="field">
+                    Service name
+                    <input
+                      name="name"
+                      required
+                      defaultValue="model-service"
+                      pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?"
+                      maxLength={63}
+                      title="Lowercase letters, digits and hyphens; start and end with a letter or digit."
+                    />
+                  </label>
+                  <label className="field">
+                    Namespace
+                    <input
+                      name="namespace"
+                      required
+                      defaultValue="strawhats"
+                      pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?"
+                      maxLength={63}
+                    />
+                  </label>
+                </div>
+              </fieldset>
+              <fieldset className="form-section">
+                <legend>
+                  <span>03</span> Resource requests
+                </legend>
+                <div className="resource-grid">
+                  <label className="field">
+                    Replicas
+                    <input
+                      name="replicas"
+                      type="number"
+                      required
+                      min="1"
+                      max="10"
+                      defaultValue="2"
+                    />
+                  </label>
+                  <label className="field">
+                    CPU (mCPU)
+                    <input
+                      name="cpu_millicores"
+                      type="number"
+                      required
+                      min="50"
+                      max="8000"
+                      defaultValue="250"
+                    />
+                  </label>
+                  <label className="field">
+                    Memory (MiB)
+                    <input
+                      name="memory_mebibytes"
+                      type="number"
+                      required
+                      min="128"
+                      max="16384"
+                      defaultValue="256"
+                    />
+                  </label>
+                </div>
+              </fieldset>
               <button className="primary full" disabled={busy}>
                 <FileCode size={16} />
                 {busy ? 'Generating…' : 'Generate preview'}
@@ -227,6 +246,11 @@ export default function Deployments({
                   {plan.replicas} replicas · {plan.cpu_millicores} mCPU ·{' '}
                   {plan.memory_mebibytes} MiB
                 </span>
+              </div>
+              <div className="manifest-file">
+                <FileCode size={17} aria-hidden="true" />
+                <span>{plan.name}-preview.yaml</span>
+                <small>YAML</small>
               </div>
               <pre tabIndex={0} aria-label="Kubernetes YAML preview">
                 <code>{plan.manifest}</code>

@@ -18,7 +18,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 
 ## Features in this release
 
-- Light responsive React dashboard with Overview, Models, Deployment previews, Assistant, and Activity.
+- One Piece-inspired responsive React dashboard with parchment panels, nautical branding, and Overview, Models, Deployment previews, Assistant, and Activity.
 - Persistent SQLite model/container registry and timeline.
 - Reproducible Iris classifier with held-out evaluation and real local predictions.
 - Kubernetes Namespace, Deployment, and Service YAML previews with selected resources, replicas, probes, and nonroot settings; copy/download support.

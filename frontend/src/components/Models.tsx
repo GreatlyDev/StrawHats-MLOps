@@ -7,11 +7,16 @@ import { Badge, Empty, ErrorNotice, percent } from './shared';
 export default function Models({
   models,
   refresh,
+  isActive,
 }: {
   models: Model[];
   refresh: () => Promise<void>;
+  isActive: boolean;
 }) {
   const [modal, setModal] = useState(false);
+  useEffect(() => {
+    if (!isActive) setModal(false);
+  }, [isActive]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState('');
@@ -33,7 +38,7 @@ export default function Models({
     <>
       <div className="section-toolbar">
         <div>
-          <h2>Your model registry</h2>
+          <h2>Registered models</h2>
           <p>Versioned models, measured results, and a place to start.</p>
         </div>
         <div className="actions">
@@ -56,13 +61,16 @@ export default function Models({
         {models.length ? (
           <div className="table-scroll">
             <table>
+              <caption className="sr-only">
+                Registered models and evaluation results
+              </caption>
               <thead>
                 <tr>
-                  <th>Model</th>
-                  <th>Framework</th>
-                  <th>Version</th>
-                  <th>Accuracy</th>
-                  <th>Type</th>
+                  <th scope="col">Model</th>
+                  <th scope="col">Framework</th>
+                  <th scope="col">Version</th>
+                  <th scope="col">Accuracy</th>
+                  <th scope="col">Type</th>
                 </tr>
               </thead>
               <tbody>
@@ -190,7 +198,7 @@ export default function Models({
           )}
         </section>
       </div>
-      {modal && (
+      {isActive && modal && (
         <RegisterModal close={() => setModal(false)} refresh={refresh} />
       )}
     </>
@@ -294,7 +302,14 @@ function RegisterModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
-    dialog.current?.showModal();
+    const element = dialog.current;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    element?.showModal();
+    return () => {
+      element?.close();
+      if (previousFocus?.isConnected)
+        previousFocus.focus({ preventScroll: true });
+    };
   }, []);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -315,6 +330,8 @@ function RegisterModal({
     <dialog
       ref={dialog}
       className="modal"
+      aria-labelledby="register-title"
+      aria-describedby="register-description"
       onCancel={(e) => {
         if (busy) e.preventDefault();
         else close();
@@ -323,7 +340,7 @@ function RegisterModal({
       <div className="modal-heading">
         <div>
           <span className="eyebrow">MODEL REGISTRY</span>
-          <h2>Register a container model</h2>
+          <h2 id="register-title">Register a container model</h2>
         </div>
         <button
           type="button"
@@ -335,7 +352,7 @@ function RegisterModal({
           <X size={20} />
         </button>
       </div>
-      <p>
+      <p id="register-description">
         Save the model’s metadata and image reference for deployment previews.
       </p>
       <form onSubmit={submit}>

@@ -5,6 +5,10 @@ import {
   Timer,
   Zap,
   ArrowRight,
+  Anchor,
+  ScrollText,
+  Compass,
+  Radio,
 } from 'lucide-react';
 import type { Workspace } from '../types';
 import { Badge, Empty, date } from './shared';
@@ -13,7 +17,7 @@ export default function Overview({
   navigate,
 }: {
   data: Workspace;
-  navigate: (view: 'models' | 'deployments') => void;
+  navigate: (view: 'models' | 'deployments' | 'assistant' | 'activity') => void;
 }) {
   const points = data.overview.recent_inferences;
   const max = Math.max(...points.map((p) => p.latency_ms), 1);
@@ -25,28 +29,11 @@ export default function Overview({
     .join(' ');
   return (
     <>
-      <div className="welcome">
-        <div>
-          <span className="eyebrow">YOUR MODEL OPERATIONS, IN ONE PLACE</span>
-          <h2>A clear view of your workspace.</h2>
-          <p>
-            From your first model to a deployment-ready manifest. Keep every
-            step in sight.
-          </p>
-          <button className="primary" onClick={() => navigate('models')}>
-            Explore model registry <ArrowUpRight size={16} />
-          </button>
-        </div>
-        <div className="welcome-art" aria-hidden="true">
-          <div className="orbit one" />
-          <div className="orbit two" />
-          <div className="hat">
-            <div className="hat-crown" />
-            <div className="hat-band" />
-            <div className="hat-brim" />
-          </div>
-          <span className="art-label">READY FOR THE NEXT VOYAGE</span>
-        </div>
+      <div className="section-intro sr-only">
+        <h2>
+          <Compass size={19} aria-hidden="true" /> At a glance
+        </h2>
+        <span>Your workspace, by the numbers</span>
       </div>
       <div className="stats">
         {[
@@ -75,23 +62,98 @@ export default function Overview({
                 ? '—'
                 : `${data.overview.median_latency_ms.toFixed(2)} ms`,
             icon: Timer,
-            note: 'Across recorded predictions',
+            note: 'Last 30 recorded predictions',
           },
-        ].map((stat) => (
-          <section className="stat card" key={stat.label}>
+        ].map((stat, index) => (
+          <section className={`stat card stat-${index}`} key={stat.label}>
             <div className="stat-top">
+              <span className="stat-icon">
+                <stat.icon size={20} aria-hidden="true" />
+              </span>
               <span>{stat.label}</span>
-              <stat.icon size={18} />
             </div>
             <strong>{stat.value}</strong>
             <small>{stat.note}</small>
           </section>
         ))}
       </div>
+      <div className="course-grid">
+        <section className="welcome" aria-labelledby="voyage-title">
+          <img
+            className="welcome-image"
+            src="/images/grand-line-voyage.webp"
+            width="1200"
+            height="800"
+            alt=""
+            fetchPriority="high"
+          />
+          <div className="welcome-copy">
+            <span className="voyage-tag">
+              <Anchor size={14} aria-hidden="true" /> THE GRAND LINE AWAITS
+            </span>
+            <h2 id="voyage-title">
+              A clear course.
+              <br />
+              <em>A grand adventure.</em>
+            </h2>
+            <p>
+              From your first model to your next deployment preview. Captain,
+              you’re in control.
+            </p>
+            <button
+              className="hero-secondary"
+              onClick={() => navigate('deployments')}
+            >
+              Chart a deployment preview{' '}
+              <ArrowRight size={17} aria-hidden="true" />
+            </button>
+          </div>
+        </section>
+        <section className="card course-card" aria-labelledby="course-title">
+          <span className="eyebrow">YOUR NEXT MOVE</span>
+          <h2 id="course-title">Choose your course</h2>
+          {[
+            {
+              view: 'models' as const,
+              title: 'Test a model',
+              note: 'Registry & real predictions',
+              icon: Box,
+            },
+            {
+              view: 'deployments' as const,
+              title: 'Prepare a preview',
+              note: 'Review Kubernetes YAML',
+              icon: Layers,
+            },
+            {
+              view: 'assistant' as const,
+              title: 'Ask the crew assistant',
+              note: 'Guidance for your workspace',
+              icon: Radio,
+            },
+          ].map((action) => (
+            <button
+              className="course-action"
+              key={action.view}
+              onClick={() => navigate(action.view)}
+            >
+              <span className="course-action-icon">
+                <action.icon size={19} aria-hidden="true" />
+              </span>
+              <span>
+                <strong>{action.title}</strong>
+                <small>{action.note}</small>
+              </span>
+              <ArrowUpRight size={17} aria-hidden="true" />
+            </button>
+          ))}
+        </section>
+      </div>
       <div className="overview-grid">
         <section className="card chart-card">
           <div className="card-heading">
             <div>
+              <span className="eyebrow">OBSERVABILITY</span>
               <h3>Inference performance</h3>
               <p>Latency from your recent predictions</p>
             </div>
@@ -107,8 +169,16 @@ export default function Overview({
               >
                 <defs>
                   <linearGradient id="chart-fill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#df9275" stopOpacity=".23" />
-                    <stop offset="100%" stopColor="#df9275" stopOpacity="0" />
+                    <stop
+                      offset="0%"
+                      stopColor="var(--ocean)"
+                      stopOpacity=".2"
+                    />
+                    <stop
+                      offset="100%"
+                      stopColor="var(--ocean)"
+                      stopOpacity="0"
+                    />
                   </linearGradient>
                 </defs>
                 {[35, 80, 125, 170].map((y) => (
@@ -118,7 +188,7 @@ export default function Overview({
                     x2="670"
                     y1={y}
                     y2={y}
-                    stroke="#eeeae5"
+                    stroke="var(--border)"
                     strokeDasharray="4 5"
                   />
                 ))}
@@ -135,7 +205,7 @@ export default function Overview({
                 <polyline
                   points={coords}
                   fill="none"
-                  stroke="#ce795e"
+                  stroke="var(--ocean)"
                   strokeWidth="2.5"
                   strokeLinejoin="round"
                 />
@@ -145,7 +215,7 @@ export default function Overview({
                     cx={40 + (i * 620) / Math.max(points.length - 1, 1)}
                     cy={170 - (point.latency_ms / max) * 135}
                     r="3.5"
-                    fill="#ce795e"
+                    fill="var(--ocean)"
                   >
                     <title>
                       {date(point.created_at)}: {point.latency_ms.toFixed(2)} ms
@@ -162,9 +232,39 @@ export default function Overview({
               </svg>
               <p className="chart-caption">
                 {points.length} recorded{' '}
-                {points.length === 1 ? 'prediction' : 'predictions'} · Hover
-                over a point for details
+                {points.length === 1 ? 'prediction' : 'predictions'} · Oldest to
+                latest
               </p>
+              <details className="chart-details">
+                <summary>View prediction data</summary>
+                <div className="table-scroll">
+                  <table>
+                    <caption className="sr-only">
+                      Recent measured predictions, oldest to latest
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Recorded at</th>
+                        <th scope="col">Class</th>
+                        <th scope="col">Latency (ms)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {points.map((point, i) => (
+                        <tr key={`${point.created_at}-${i}`}>
+                          <td>
+                            <time dateTime={point.created_at}>
+                              {date(point.created_at)}
+                            </time>
+                          </td>
+                          <td>{point.label}</td>
+                          <td>{point.latency_ms.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
             </>
           ) : (
             <Empty title="Your next prediction starts the story">
@@ -173,9 +273,10 @@ export default function Overview({
             </Empty>
           )}
         </section>
-        <section className="card">
+        <section className="card readiness-card">
           <div className="card-heading">
             <div>
+              <span className="eyebrow">SERVICE CHECK</span>
               <h3>Workspace readiness</h3>
               <p>Actual service status</p>
             </div>
@@ -228,15 +329,19 @@ export default function Overview({
       <section className="card">
         <div className="card-heading">
           <div>
+            <span className="eyebrow">THE SHIP’S LOG</span>
             <h3>Recent activity</h3>
             <p>The latest steps in your model lifecycle</p>
           </div>
+          <button className="text-button" onClick={() => navigate('activity')}>
+            View ship’s log <ArrowUpRight size={17} aria-hidden="true" />
+          </button>
         </div>
         {data.events.length ? (
           data.events.slice(0, 4).map((event) => (
             <div className="event-row" key={event.id}>
               <div className="event-icon">
-                <Box size={17} />
+                <ScrollText size={18} aria-hidden="true" />
               </div>
               <div>
                 <strong>{event.title}</strong>

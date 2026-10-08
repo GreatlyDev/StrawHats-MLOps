@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Sparkles, Send, ArrowUpRight } from 'lucide-react';
+import { Send, ArrowUpRight } from 'lucide-react';
 import { request } from '../api';
 import { assistantContext } from '../assistant-context';
 import type { Health, Message } from '../types';
 import { Badge, ErrorNotice } from './shared';
+import { TransponderSnail } from './CrewArt';
 const suggestions = [
   'How should I deploy my registered model?',
   'Explain my model evaluation metrics.',
@@ -49,7 +50,7 @@ export default function Assistant({ health }: { health: Health }) {
     <>
       <div className="section-toolbar">
         <div>
-          <h2>A little guidance for the voyage</h2>
+          <h2>Your Den Den Mushi</h2>
           <p>Ask about your models, evaluation, and deployment plans.</p>
         </div>
         <Badge tone={health.ai_configured ? 'green' : 'gold'}>
@@ -58,6 +59,15 @@ export default function Assistant({ health }: { health: Health }) {
       </div>
       <div className="assistant-layout">
         <section className="card assistant-card">
+          <div className="assistant-channel">
+            <span className="channel-mark">
+              <TransponderSnail />
+            </span>
+            <div>
+              <strong>Crew assistant</strong>
+              <small>Models · evaluation · deployment</small>
+            </div>
+          </div>
           <div
             className="chat-messages"
             aria-live="polite"
@@ -75,9 +85,9 @@ export default function Assistant({ health }: { health: Health }) {
             ) : (
               <div className="assistant-welcome">
                 <div className="sparkle-icon">
-                  <Sparkles size={30} />
+                  <TransponderSnail />
                 </div>
-                <h3>Think through your next step.</h3>
+                <h3>Let’s chart your next move.</h3>
                 <p>
                   Your assistant uses the current workspace to help you
                   understand model results and prepare deployment plans.
@@ -102,12 +112,13 @@ export default function Assistant({ health }: { health: Health }) {
             )}
           </div>
           {error && <ErrorNotice message={error} />}
+          <label htmlFor="assistant-input" className="composer-label">
+            Message the assistant
+          </label>
           <form className="composer" onSubmit={submit}>
-            <label htmlFor="assistant-input" className="sr-only">
-              Message the assistant
-            </label>
             <textarea
               id="assistant-input"
+              aria-describedby="assistant-note"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ask a question about your workspace…"
@@ -121,15 +132,15 @@ export default function Assistant({ health }: { health: Health }) {
               disabled={busy || !input.trim() || !health.ai_configured}
               aria-label="Send message"
             >
-              <Send size={18} />
+              <Send size={18} aria-hidden="true" />
             </button>
           </form>
-          <small className="chat-footnote">
+          <small className="chat-footnote" id="assistant-note">
             Recommendations only. The assistant cannot apply cluster changes.
           </small>
         </section>
         <aside className="card assistant-aside">
-          <span className="eyebrow">YOUR WORKSPACE COPILOT</span>
+          <span className="eyebrow">A DIRECT LINE TO YOUR WORKSPACE</span>
           <h3>
             Grounded in
             <br />
