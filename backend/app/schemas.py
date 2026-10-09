@@ -1,6 +1,12 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 DNSName = Annotated[
     str, StringConstraints(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -19,6 +25,19 @@ class RegisterModel(BaseModel):
     framework: str = Field(min_length=1, max_length=50)
     description: str = Field(default="", max_length=600)
     image: ImageReference
+
+    @field_validator("name", "version", "framework", "description", mode="before")
+    @classmethod
+    def normalize_registration_text(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} is required.")
+        if not isinstance(value, str):
+            raise ValueError(f"{info.field_name} must be a string.")
+
+        normalized = value.strip()
+        if info.field_name in {"name", "version", "framework"} and not normalized:
+            raise ValueError(f"{info.field_name} cannot be blank.")
+        return normalized
 
 
 class PredictionInput(BaseModel):
