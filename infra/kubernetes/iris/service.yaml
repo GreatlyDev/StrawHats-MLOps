@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: iris
+  namespace: strawhats
+  labels:
+    app: iris
+spec:
+  type: ClusterIP
+  selector:
+    app: iris
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

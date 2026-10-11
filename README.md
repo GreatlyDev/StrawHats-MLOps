@@ -25,7 +25,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 - Read-only cluster reachability check that reports the actual local context.
 - Observed prediction counts/latency and Prometheus endpoints.
 - LangChain/OpenAI guidance with server-only credentials and actionable provider errors.
-- Standalone Iris model service ready for container image validation.
+- Standalone Iris model service verified in a hardened Linux container.
 
 Container registrations store metadata. The name/version Iris classifier v1.0.0 is reserved for the built-in example. Local inference supports the bundled Iris example; external images require a separately deployed endpoint. Previews do not apply workloads to a cluster.
 
@@ -110,11 +110,15 @@ Tests exercise persistence, input rejection, real predictions, manifest contents
 Build from the repository root after starting Docker:
 
 ```powershell
-docker build -f backend/Dockerfile.model -t strawhats-iris:0.1.0 .
-docker run --rm -p 127.0.0.1:8001:8000 strawhats-iris:0.1.0
+docker build --platform linux/amd64 -f backend/Dockerfile.model -t strawhats-iris:0.1.0 .
+docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001 --cap-drop ALL --security-opt no-new-privileges --cpus 0.5 --memory 512m -p 127.0.0.1:8001:8000 strawhats-iris:0.1.0
+# In another terminal:
+.\.venv\Scripts\python.exe -m scripts.cloud.smoke --base-url http://127.0.0.1:8001
 ```
 
-The model image runs as UID 10001 and exposes `/health`, `/predict`, and `/metrics` on port 8000, matching the generated manifests. Push an image to a registry accessible to the cluster before using it in a real workload. Image build/run remains unverified on the initial development machine because its Docker engine was stopped.
+The model image runs as UID 10001 and exposes `/health`, `/predict`, and `/metrics` on port 8000. On October 11, 2026, the Linux/amd64 image passed real prediction, input rejection, and metrics checks before and after a container restart under these security and resource limits. Observed memory use was approximately 96 MiB. Held-out accuracy and macro F1 were both 0.9333; the sample above predicted setosa with confidence 0.9808. These are local observations; AWS deployment remains pending.
+
+The fixed one-replica workload in `infra/kubernetes/iris` renders with `kubectl kustomize infra/kubernetes/iris`. Use an immutable registry digest before applying it to a cloud cluster.
 
 `backend/Dockerfile` is a separate orchestrator API image. It needs persistent storage for `/app/.local` and runtime environment secrets. It does not include kubectl. Do not deploy the current management API publicly until authentication/authorization, request budgets, shared persistence, and production CORS are implemented.
 
