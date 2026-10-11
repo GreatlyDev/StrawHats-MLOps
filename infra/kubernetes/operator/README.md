@@ -97,6 +97,9 @@ children. The snapshot survives controller restarts.
 
 Only 1–2 replicas, 100–500 CPU millicores, and 128–512Mi requested memory are
 allowed; limits are twice requests. Local examples use `imagePullPolicy: Never`.
+Image references use lowercase repository/registry names, an optional tag, and/or
+a full lowercase SHA256 digest. URLs, whitespace, and malformed references are
+rejected before child resources change.
 The controller refuses foreign/unowned same-name children and repairs missing
 owned resources. It receives no Secret permissions, cluster-wide role, or AWS
 credentials. Operator updates use Recreate to keep one active reconciler.

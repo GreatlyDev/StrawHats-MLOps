@@ -118,8 +118,16 @@ def reconcile(resource: dict, api: ClusterAPI) -> None:
         if current is None:
             create(wanted)
             changed = True
-        elif not _matches(current, wanted):
+        elif not _matches(current, wanted) or (
+            wanted["kind"] == "Service"
+            and current["spec"].get("selector") != wanted["spec"]["selector"]
+        ):
             body = deepcopy(wanted)
+            if wanted["kind"] == "Service":
+                # Merge patches retain map entries unless explicitly removed.
+                for key in current["spec"].get("selector", {}):
+                    if key not in wanted["spec"]["selector"]:
+                        body["spec"]["selector"][key] = None
             if current["metadata"].get("resourceVersion"):
                 body["metadata"]["resourceVersion"] = current["metadata"][
                     "resourceVersion"
@@ -166,7 +174,9 @@ def reconcile(resource: dict, api: ClusterAPI) -> None:
         endpoint.get("targetRef", {}).get("uid")
         for slice_ in api.list_endpoint_slices(name)
         if any(
-            p.get("port") == 8000 and p.get("protocol", "TCP") == "TCP"
+            p.get("name") == "http"
+            and p.get("port") == 8000
+            and p.get("protocol", "TCP") == "TCP"
             for p in slice_.get("ports", [])
         )
         for endpoint in slice_.get("endpoints", [])

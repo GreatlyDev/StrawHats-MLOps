@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -64,6 +65,37 @@ def test_rejects_invalid_target(resource, field, value):
 def test_requires_image():
     with pytest.raises(ValueError):
         parse_target({})
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "https://example.com/iris:latest",
+        "iris::latest",
+        "!!!",
+        "iris@sha256:short",
+        "/iris:latest",
+        "iris:",
+    ],
+)
+def test_rejects_malformed_image_references(resource, image):
+    resource["spec"]["image"] = image
+    with pytest.raises(ValueError):
+        parse_target(resource["spec"])
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "iris",
+        "strawhats-iris:milestone-one",
+        "registry.example.com:5000/team/iris:v1",
+        "123456789012.dkr.ecr.us-east-1.amazonaws.com/iris@sha256:" + "a" * 64,
+    ],
+)
+def test_accepts_supported_image_references(resource, image):
+    resource["spec"]["image"] = image
+    assert parse_target(resource["spec"]).image == image
 
 
 @pytest.mark.parametrize("replicas,cpu,memory", [(1, 100, 128), (2, 500, 512)])
@@ -147,7 +179,10 @@ def test_crd_has_validated_scale_and_status_contract():
     ]:
         assert fields[field]["type"] == "integer"
         assert (fields[field]["minimum"], fields[field]["maximum"]) == (low, high)
-    assert fields["image"]["pattern"] == r"^\S+$"
+    image_pattern = re.compile(fields["image"]["pattern"])
+    assert image_pattern.fullmatch("strawhats-iris:milestone-one")
+    assert image_pattern.fullmatch("https://example.com/iris:latest") is None
+    assert image_pattern.fullmatch("iris::latest") is None
 
 
 def test_local_install_is_namespaced_and_least_privilege():

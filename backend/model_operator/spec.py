@@ -3,6 +3,13 @@
 import re
 from dataclasses import dataclass
 
+IMAGE_PATTERN = (
+    r"^([a-z0-9]+([.-][a-z0-9]+)*(:[0-9]{1,5})?/)?"
+    r"[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*"
+    r"(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*"
+    r"(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(@sha256:[a-f0-9]{64})?$"
+)
+
 
 @dataclass(frozen=True)
 class Target:
@@ -26,8 +33,10 @@ def parse_target(spec: dict) -> Target:
     if not isinstance(spec, dict):
         raise ValueError("A model configuration is required")
     image = spec.get("image")
-    if not isinstance(image, str) or not re.fullmatch(r"\S+", image):
-        raise ValueError("image must be a nonempty image reference without whitespace")
+    if not isinstance(image, str) or not re.fullmatch(IMAGE_PATTERN, image):
+        raise ValueError(
+            "image must use a lowercase repository with optional tag or SHA256 digest"
+        )
     policy = spec.get("imagePullPolicy", "Never")
     if policy not in ("Never", "IfNotPresent"):
         raise ValueError("imagePullPolicy must be Never or IfNotPresent")

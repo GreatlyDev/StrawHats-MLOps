@@ -9,7 +9,9 @@ from backend.model_operator.workload import render_workload
 
 def merge(destination, patch):
     for key, value in patch.items():
-        if isinstance(value, dict):
+        if value is None:
+            destination.pop(key, None)
+        elif isinstance(value, dict):
             merge(destination.setdefault(key, {}), value)
         else:
             destination[key] = deepcopy(value)
@@ -111,7 +113,7 @@ class Cluster:
         ]
         self.slices = [
             {
-                "ports": [{"port": 8000, "protocol": "TCP"}],
+                "ports": [{"name": "http", "port": 8000, "protocol": "TCP"}],
                 "endpoints": [
                     {
                         "conditions": {"ready": True},
@@ -311,3 +313,39 @@ def test_kubernetes_quantity_normalization_does_not_trigger_writes(resource, clu
     reconcile(resource, cluster)
     assert len(cluster.child_writes) == before
     assert resource["status"]["phase"] == "Ready"
+
+
+def test_wrong_endpoint_port_name_cannot_certify_readiness(resource, cluster):
+    reconcile(resource, cluster)
+    cluster.ready()
+    cluster.slices[0]["ports"][0]["name"] = "wrong-port-name"
+    reconcile(resource, cluster)
+    assert resource["status"]["phase"] == "Pending"
+    assert "lastReadySpec" not in resource["status"]
+
+
+def test_extra_service_selector_is_removed_and_repair_converges(resource, cluster):
+    verified(resource, cluster)
+    cluster.service["spec"]["selector"]["unmatched"] = "extra"
+    cluster.slices = []
+    reconcile(resource, cluster)
+    assert cluster.service["spec"]["selector"] == {
+        "mlops.strawhats.dev/owner-uid": "iris-uid",
+    }
+    assert cluster.service["spec"]["clusterIP"] == "10.96.1.2"
+    cluster.ready()
+    reconcile(resource, cluster)
+    assert resource["status"]["phase"] == "Ready"
+    writes = len(cluster.child_writes)
+    reconcile(resource, cluster)
+    assert len(cluster.child_writes) == writes
+
+
+@pytest.mark.parametrize(
+    "image", ["https://example.com/iris:latest", "iris::latest", "!!!"]
+)
+def test_malformed_image_does_not_write_children(resource, cluster, image):
+    resource["spec"]["image"] = image
+    reconcile(resource, cluster)
+    assert cluster.child_writes == []
+    assert resource["status"]["phase"] == "Failed"
