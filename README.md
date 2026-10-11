@@ -28,6 +28,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 - Standalone Iris model service verified in a hardened Linux container.
 - Namespaced Python Kubernetes operator with a bounded ModelDeployment CRD, verified local scaling and explicit rollback; see [local operator setup](infra/kubernetes/operator/README.md).
 - Opt-in Local Iris dashboard controls, restricted to one Docker Desktop namespace/resource; accepted requests remain Pending until the operator observes the change.
+- Deployed Iris predictions through the fixed local Kubernetes Service, with measured probabilities, model latency, and deployment provenance.
 
 Container registrations store metadata. The name/version Iris classifier v1.0.0 is reserved for the built-in example. Local inference supports the bundled Iris example; external images require a separately deployed endpoint. Previews do not apply workloads to a cluster.
 
@@ -40,7 +41,7 @@ React / TypeScript / Vite dashboard
 FastAPI ── SQLite + local trained artifact
   ├── model registry, inference, measured metrics
   ├── Kubernetes YAML preview + read-only kubectl health
-  ├── Local Iris lifecycle bridge → docker-desktop ModelDeployment
+  ├── Local Iris bridge → docker-desktop ModelDeployment + Iris Service inference
   └── LangChain ── OpenAI (only on assistant submission)
 
 Standalone model service: /health, /predict, /metrics
@@ -126,15 +127,28 @@ verified `strawhats-iris:milestone-one` image. Install
 - **Rollback Iris** requests the operator's most recent verified snapshot. It
   restores that snapshot after a failed rollout; each successful configuration
   replaces the snapshot.
+- **Predict with deployed Iris** sends four flower measurements in centimeters
+  through the Kubernetes API proxy to the owned `iris:8000` Service. It requires
+  a current Ready/RolledBack generation and at least one ready replica; no
+  separate port-forward or workspace model registration is needed. Results show
+  the deployed model's probabilities, processing time, image, and generation.
+  Service failures show an error without substituting a workspace prediction.
 - The panel polls observed status while visible. An accepted request is not a
   completed rollout; unavailable/stale status pauses controls. Activity records
   describe requests, while readiness comes from the controller.
 
-These actions write only the ModelDeployment specification in context
+Lifecycle actions write only the ModelDeployment specification in context
 `docker-desktop`, namespace `strawhats-operator-local`, name `iris`. The backend
 requires a loopback caller/host and a verified local Kubernetes HTTPS endpoint.
 Controls default to disabled; this local development flow does not create AWS
 resources. Manifest previews retain their existing export-only behavior.
+
+The **Models → Workspace prediction** form runs the workspace artifact and
+updates Overview's workspace inference count. Deployed predictions instead
+increment the serving model's `strawhats_model_predictions_total` metric and
+record a completed Kubernetes prediction in Activity; they do not change that
+workspace count. Deployment provenance describes the revision observed when the
+request began, and model time excludes the dashboard/proxy network round trip.
 
 The Models tab still uses the workspace's local predictor. To verify the
 Kubernetes-served model separately, port-forward its Service to loopback and run

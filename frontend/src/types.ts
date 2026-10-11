@@ -87,6 +87,14 @@ export interface Prediction {
   probabilities: Record<string, number>;
   latency_ms: number;
 }
+export interface DeployedPrediction extends Prediction {
+  source: 'kubernetes';
+  context: string;
+  namespace: string;
+  service: string;
+  image: string;
+  generation: number;
+}
 export interface Message {
   role: 'user' | 'assistant';
   content: string;

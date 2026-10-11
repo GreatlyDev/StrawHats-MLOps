@@ -121,8 +121,11 @@ export default function Models({
         <section className="card">
           <div className="card-heading">
             <div>
-              <h3>Try a prediction</h3>
-              <p>Run the trained classifier with real feature values.</p>
+              <h3>Workspace prediction</h3>
+              <p>
+                Run the classifier stored in this backend workspace. Use
+                Deployments → Local Iris for Kubernetes inference.
+              </p>
             </div>
             <Play size={18} />
           </div>

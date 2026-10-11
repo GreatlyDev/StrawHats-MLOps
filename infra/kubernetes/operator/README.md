@@ -130,3 +130,8 @@ backend's `.env.local` and restart it. The existing **Deployments → Local Iris
 panel can deploy the fixed Iris image, observe status, scale between one and two
 replicas, and request snapshot rollback. See the root README for the local caller
 restrictions and the distinction between accepted requests and observed readiness.
+The panel's **Predict with deployed Iris** form sends validated measurements to
+the owned Iris Service through the Kubernetes API proxy, without a port-forward.
+It displays real probabilities and model time with deployment provenance, and
+reports an error if the current deployment or Service is unavailable. The Models
+tab's workspace predictor remains a separate flow.
