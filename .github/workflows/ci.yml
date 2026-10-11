@@ -24,9 +24,11 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: backend/requirements-lock.txt
+          cache-dependency-path: |
+            backend/requirements-lock.txt
+            backend/requirements-operator.txt
       - name: Install verified dependencies
-        run: python -m pip install -r backend/requirements-lock.txt
+        run: python -m pip install -r backend/requirements-lock.txt -r backend/requirements-operator.txt
       - name: Check dependency compatibility
         run: python -m pip check
       - name: Lint backend
