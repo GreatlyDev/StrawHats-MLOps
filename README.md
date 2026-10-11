@@ -4,7 +4,7 @@
 
 A model operations dashboard for registering ML models, testing inference, preparing Kubernetes deployment configuration, and asking for deployment guidance through LangChain. This repository is the first local foundation of the group's ML Deployment Orchestrator.
 
-**Status:** the local dashboard and API work. A local Kubernetes operator/CRD verifies Iris deployment, scaling, and rollback. UI-to-cluster integration, cloud deployment, the public demo, and demo GIF remain unfinished.
+**Status:** the local dashboard connects to a verified Kubernetes operator/CRD for Iris deployment, observed status, scaling, and rollback on Docker Desktop. Cloud deployment, full monitoring/AI automation, the public demo, and demo GIF remain unfinished.
 
 ## Team
 
@@ -27,6 +27,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 - LangChain/OpenAI guidance with server-only credentials and actionable provider errors.
 - Standalone Iris model service verified in a hardened Linux container.
 - Namespaced Python Kubernetes operator with a bounded ModelDeployment CRD, verified local scaling and explicit rollback; see [local operator setup](infra/kubernetes/operator/README.md).
+- Opt-in Local Iris dashboard controls, restricted to one Docker Desktop namespace/resource; accepted requests remain Pending until the operator observes the change.
 
 Container registrations store metadata. The name/version Iris classifier v1.0.0 is reserved for the built-in example. Local inference supports the bundled Iris example; external images require a separately deployed endpoint. Previews do not apply workloads to a cluster.
 
@@ -39,11 +40,12 @@ React / TypeScript / Vite dashboard
 FastAPI ── SQLite + local trained artifact
   ├── model registry, inference, measured metrics
   ├── Kubernetes YAML preview + read-only kubectl health
+  ├── Local Iris lifecycle bridge → docker-desktop ModelDeployment
   └── LangChain ── OpenAI (only on assistant submission)
 
 Standalone model service: /health, /predict, /metrics
 Local Kubernetes: ModelDeployment CRD → Python operator → Iris Deployment/Service
-Future: UI-to-cluster integration + Prometheus/Grafana + cloud release
+Future: Prometheus/Grafana + bounded AI adjustment + cloud release
 ```
 
 The dashboard does not receive provider keys. Local records and model artifacts live in `.local/`, which is excluded from Git. Prometheus counters reset with the process; dashboard totals persist in SQLite. Median latency covers the last 30 recorded predictions.
@@ -108,6 +110,35 @@ npm.cmd run build
 Tests exercise persistence, input rejection, real predictions, manifest contents, measured metrics, provider error handling, model-service health/inference, and browser API transport. No provider calls or cluster writes occur during tests. Browser verification covers local training, inference, YAML export, navigation, and responsive layouts.
 
 ## Containers and deployment
+
+### Local Iris dashboard controls
+
+Install the [local operator](infra/kubernetes/operator/README.md), including the
+verified `strawhats-iris:milestone-one` image. Install
+`backend/requirements-operator.txt` in the backend environment. Set
+`LOCAL_OPERATOR_ENABLED=1` in `.env.local` and restart the backend, then open
+**Deployments → Local Iris**.
+
+- **Deploy Iris** creates or updates `iris` using the verified image, selected
+  1–2 replicas, 250m CPU and 256Mi memory requests.
+- **Scale Iris** changes 1–2 replicas only after the requested configuration is
+  verified ready. Scaling after rollback preserves the restored image/resources.
+- **Rollback Iris** requests the operator's most recent verified snapshot. It
+  restores that snapshot after a failed rollout; each successful configuration
+  replaces the snapshot.
+- The panel polls observed status while visible. An accepted request is not a
+  completed rollout; unavailable/stale status pauses controls. Activity records
+  describe requests, while readiness comes from the controller.
+
+These actions write only the ModelDeployment specification in context
+`docker-desktop`, namespace `strawhats-operator-local`, name `iris`. The backend
+requires a loopback caller/host and a verified local Kubernetes HTTPS endpoint.
+Controls default to disabled; this local development flow does not create AWS
+resources. Manifest previews retain their existing export-only behavior.
+
+The Models tab still uses the workspace's local predictor. To verify the
+Kubernetes-served model separately, port-forward its Service to loopback and run
+the existing smoke checks; this milestone does not reroute Models-tab inference.
 
 Build from the repository root after starting Docker:
 

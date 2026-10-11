@@ -16,6 +16,18 @@ DeploymentPlan:
 - GET /deployment-plans -> DeploymentPlan[]
 - GET /cluster -> {"connected":false,"context":"docker-desktop","message":"No cluster is reachable. Deployment previews are available."}
 
+Local Iris (separate from manifest previews):
+- GET /local-iris -> {"enabled":true,"connected":true,"operator_ready":true,"context":"docker-desktop","namespace":"strawhats-operator-local","name":"iris","phase":"Ready","mode":"Deploy","image":"strawhats-iris:milestone-one","reported_image":"strawhats-iris:milestone-one","desired_replicas":1,"ready_replicas":1,"generation":5,"observed_generation":5,"rollback_available":true,"message":"Requested revision and endpoints are ready"}. Example values describe shape, not fixed observations.
+- POST /local-iris/deploy; body {"replicas":1} -> current Local Iris status (202); creates/updates the fixed CR with the verified image and default CPU/memory.
+- POST /local-iris/scale; body {"replicas":2} -> current Local Iris status (202); requires a verified Ready/RolledBack generation and preserves its effective image/resources.
+- POST /local-iris/rollback; body {} -> current Local Iris status (202); requests the most recent verified snapshot, leaving the operator's status intact.
+- Replica inputs are strict integers 1–2. Extra fields (including namespace/name/image) are rejected with 422. All actions require application/json.
+- Controls default to disabled unless LOCAL_OPERATOR_ENABLED=1; test-mode app instances always disable them. Disabled GET reports phase Disabled without loading cluster credentials; actions return 503. When enabled, API access requires a loopback caller/host and a permitted local browser origin.
+- The transport explicitly selects docker-desktop and refuses remote/insecure API endpoints. It writes only iris in strawhats-operator-local; no workload writes, namespace creation, CRD installation, or AWS calls occur here.
+- Ready/RolledBack reflects controller-observed generation; newer desired generations report Pending. Reported replica/image values are the last controller observations. An offline controller reports Unavailable. A missing Iris resource reports NotDeployed when the controller is ready.
+- Version conflicts/missing rollback snapshot/non-ready scaling return 409; inaccessible local Kubernetes returns sanitized 503 or access-denied 403. Failed requests do not create Activity events. Accepted requests log a request event, not claimed completion.
+- The Models prediction route remains the local workspace predictor; these lifecycle routes do not perform or fabricate deployed inference.
+
 Overview:
 {"models":1,"deployment_plans":0,"predictions":3,"median_latency_ms":1.23,"recent_inferences":[{"created_at":"ISO timestamp","latency_ms":1.23,"label":"setosa","model_id":"iris-classifier"}]}
 - GET /overview -> Overview

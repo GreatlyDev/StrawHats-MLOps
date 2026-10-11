@@ -127,7 +127,7 @@ def cluster_status(enabled: bool = True) -> dict:
         if query.returncode == 0:
             result.update(
                 connected=True,
-                message="Cluster reachable. This release creates previews only.",
+                message="Cluster reachable. Manifest previews remain separate from the Local Iris controls.",
             )
     except (OSError, subprocess.TimeoutExpired):
         pass

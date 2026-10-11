@@ -25,8 +25,8 @@ const navigation = [
   { id: 'models', label: 'Models', short: 'Models', icon: Box },
   {
     id: 'deployments',
-    label: 'Deployment previews',
-    short: 'Previews',
+    label: 'Deployments',
+    short: 'Deploy',
     icon: Layers,
   },
   { id: 'assistant', label: 'Assistant', short: 'Assistant', icon: Radio },
@@ -253,6 +253,7 @@ export default function App() {
                   plans={data.plans}
                   cluster={data.cluster}
                   refresh={refresh}
+                  isActive={view === 'deployments'}
                 />
               </div>
               <div hidden={view !== 'assistant'}>

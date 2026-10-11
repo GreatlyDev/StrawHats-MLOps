@@ -2,8 +2,8 @@
 
 This operator implements one `ModelDeployment` CRD for Iris deployment, scaling,
 and explicit rollback. It runs in `strawhats-operator-local` on Docker Desktop's
-`docker-desktop` context. It does not create AWS resources. Dashboard actions
-still produce previews; UI-to-operator integration is a later milestone.
+`docker-desktop` context. The opt-in Local Iris dashboard panel drives this
+operator; manifest previews remain available separately. AWS remains deferred.
 
 ## Build and install
 
@@ -123,3 +123,10 @@ kubectl --context docker-desktop delete namespace strawhats-operator-local
 The shared CRD can remain installed. Delete it only after checking that no
 ModelDeployment in any namespace belongs to another user or task. Never reset
 Docker Desktop's cluster to clean up this project.
+## Dashboard integration
+
+After this local installation is ready, enable `LOCAL_OPERATOR_ENABLED=1` in the
+backend's `.env.local` and restart it. The existing **Deployments → Local Iris**
+panel can deploy the fixed Iris image, observe status, scale between one and two
+replicas, and request snapshot rollback. See the root README for the local caller
+restrictions and the distinction between accepted requests and observed readiness.

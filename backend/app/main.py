@@ -18,6 +18,7 @@ from starlette.responses import Response
 
 from .assistant import AssistantUnavailable, answer
 from .deployments import cluster_status, preview
+from .local_operator import local_operator_router
 from .models import predict_example, train_example
 from .schemas import AssistantInput, DeploymentInput, PredictionInput, RegisterModel
 from .store import Store, now
@@ -55,6 +56,12 @@ def create_app(data_dir: Path | None = None, test_mode: bool = False) -> FastAPI
         allow_origins=[origin.strip() for origin in origins],
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
+    )
+    app.include_router(
+        local_operator_router(
+            enabled=not test_mode and os.getenv("LOCAL_OPERATOR_ENABLED") == "1",
+            record_event=store.event,
+        )
     )
 
     def find_model(model_id: str) -> dict:

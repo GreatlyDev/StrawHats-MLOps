@@ -49,6 +49,32 @@ export interface Cluster {
   context: string | null;
   message: string;
 }
+export interface LocalIris {
+  enabled: boolean;
+  connected: boolean;
+  operator_ready: boolean;
+  context: string;
+  namespace: string;
+  name: string;
+  phase:
+    | 'Disabled'
+    | 'Unavailable'
+    | 'NotDeployed'
+    | 'Pending'
+    | 'Ready'
+    | 'RolledBack'
+    | 'Failed'
+    | 'Conflict';
+  mode: 'Deploy' | 'Rollback' | null;
+  image: string;
+  reported_image: string | null;
+  desired_replicas: number | null;
+  ready_replicas: number;
+  generation: number | null;
+  observed_generation: number | null;
+  rollback_available: boolean;
+  message: string;
+}
 export interface Health {
   status: string;
   ai_configured: boolean;
