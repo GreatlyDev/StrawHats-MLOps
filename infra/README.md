@@ -32,7 +32,7 @@ preparation. Owner approval of a local template is not approval to run it.
 
 ## Access and preflight
 
-Use current AWS CLI v2, Docker Linux/amd64, Python 3.12, and kubectl compatible
+Use current AWS CLI v2, Docker with Buildx and Linux/amd64, Python 3.12, and kubectl compatible
 with Kubernetes 1.35. Local preparation did not install AWS CLI or create keys.
 The initial browser session was root; release requires a named non-root owner
 with the appropriate EKS/CloudFormation/IAM/network/ECR permissions and MFA.
@@ -86,17 +86,25 @@ Create rechecks the reviewed template, parameters, ownership tags, identity,
 eligibility, and future end time. It awaits stack completion and checks exactly
 one Ready worker. Publish requires a clean Git checkout, builds a commit-SHA
 Linux image, verifies that actual rebuilt container before ECR login/push, and
-records its digest. The ECR password goes directly to Docker's stdin; temporary
+records its digest and the Linux/amd64 manifest/config identities (including
+OCI indexes with separate attestations). The ECR password goes directly to Docker's stdin; temporary
 task-only Docker credentials are removed afterward. Apply renders an ignored
 digest overlay and awaits rollout. Verify checks workload security/resources,
+the published release digest, its owned Ready pod and ready Service EndpointSlice,
 real HTTP inference, invalid-input rejection and metrics, then restarts the pod
-and repeats the HTTP checks. Verification is through a loopback port-forward;
+and repeats those checks on a replacement pod. HTTP verification targets the
+verified pod through a loopback port-forward;
 this milestone does not expose the model or management API publicly.
 
 Evidence stays under `.local/milestone-one/`, including source SHA, image digest,
 timestamps and measured responses. Successful image publication or rollout alone
 does not mean cloud inference passed. Release mutations stop after the approved
-end; cleanup remains available. A failure/timeout stops subsequent operations.
+end; each cloud/Kubernetes mutation rechecks the deadline, including after long
+builds or preflight reads. Cleanup remains available. A failure/timeout stops subsequent operations.
+Safe failure records in `.local/milestone-one/command-failures.jsonl` retain the
+time, operation, status, stack/change-set identifiers, and allowlisted AWS or
+kubectl error codes. Arbitrary process output and credential-operation output
+are excluded. Inspect these records and AWS stack events for fuller diagnosis.
 Inspect AWS stack events and current state before retrying; a partially created
 stack can incur charges even when the CLI reports failure. Do not repeatedly
 create replacement stacks, overwrite immutable tags, or delete other resources.

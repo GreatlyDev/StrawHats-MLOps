@@ -7,13 +7,16 @@ import json
 import re
 import socket
 import subprocess
+import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
 from .aws_commands import (
+    record_failure,
     require_eks_context,
     run_checked,
     validate_creation_window,
@@ -28,6 +31,10 @@ REGION = "us-east-1"
 CLUSTER = "strawhats-midterm"
 PROJECT = "StrawHats-MLOps"
 KUBECONFIG = LOCAL / "kubeconfig"
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 
 def read_json(path):
@@ -70,7 +77,7 @@ def parser():
         if name == "create":
             command.add_argument("--receipt", default=str(LOCAL / "preview.json"))
             command.add_argument("--confirm-execute")
-        if name == "apply":
+        if name in {"apply", "verify"}:
             command.add_argument("--image-receipt", default=str(LOCAL / "image.json"))
         if name == "cleanup":
             command.add_argument("--confirm-delete")
@@ -82,12 +89,18 @@ class Cloud:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", args.profile):
             raise RuntimeError("Use a named AWS profile.")
         self.args, self.run = args, run
+        self.window = None
         self.identity = self.aws("sts", "get-caller-identity")
         self.principal = validate_identity(self.identity, args.account)
         self.context = f"arn:aws:eks:{REGION}:{args.account}:cluster/{CLUSTER}"
         require_eks_context(self.context, args.account, REGION, CLUSTER)
 
     def aws(self, *arguments, text=False, timeout=60):
+        if arguments[:2] in {
+            ("cloudformation", "create-change-set"),
+            ("cloudformation", "execute-change-set"),
+        }:
+            self.guard_window()
         output = self.run(
             [
                 "aws",
@@ -106,6 +119,8 @@ class Cloud:
         return output if text else json.loads(output or "{}")
 
     def kubectl(self, *arguments, timeout=120):
+        if "apply" in arguments or "restart" in arguments:
+            self.guard_window()
         return self.run(
             [
                 "kubectl",
@@ -117,6 +132,17 @@ class Cloud:
             ],
             timeout_seconds=timeout,
         )
+
+    def set_window(self, budget, end):
+        validate_creation_window(budget, end, utc_now())
+        self.window = (budget, end)
+
+    def guard_window(self):
+        if self.window is None:
+            raise RuntimeError(
+                "Approved runtime budget and end must be loaded before a write."
+            )
+        validate_creation_window(*self.window, utc_now())
 
     def owner(self, arn):
         if not re.fullmatch(
@@ -227,10 +253,9 @@ class Cloud:
         if active and stack["StackStatus"] != "CREATE_COMPLETE":
             raise RuntimeError("A completely created project stack is required.")
         if active:
-            validate_creation_window(
+            self.set_window(
                 float(tags.get("BudgetUsd", "nan")),
                 datetime.fromisoformat(tags.get("RuntimeEndAt", "")),
-                datetime.now(timezone.utc),
             )
         return stack, {
             o["OutputKey"]: o["OutputValue"] for o in stack.get("Outputs", [])
@@ -240,7 +265,7 @@ class Cloud:
 def preview(cloud):
     args = cloud.args
     end = datetime.fromisoformat(args.end_at.replace("Z", "+00:00"))
-    validate_creation_window(args.budget_usd, end, datetime.now(timezone.utc))
+    cloud.set_window(args.budget_usd, end)
     cloud.owner(args.owner_arn)
     network = ipaddress.ip_network(args.admin_cidr, strict=True)
     if (
@@ -346,7 +371,7 @@ def create(cloud, receipt):
     if receipt["account"] != args.account or receipt["profile"] != args.profile:
         raise RuntimeError("Receipt belongs to a different account/profile.")
     end = datetime.fromisoformat(receipt["end_at"])
-    validate_creation_window(receipt["budget_usd"], end, datetime.now(timezone.utc))
+    cloud.set_window(receipt["budget_usd"], end)
     if not receipt.get("eligibility_confirmed"):
         raise RuntimeError("Eligibility was not confirmed.")
     change_set = receipt["change_set"]
@@ -545,26 +570,45 @@ def publish(cloud):
             ],
             stdin=password,
         )
+        cloud.guard_window()
         cloud.run(
             ["docker", "--config", str(config), "push", image], timeout_seconds=900
         )
+        detail = cloud.aws(
+            "ecr",
+            "describe-images",
+            "--repository-name",
+            outputs["RepositoryName"],
+            "--image-ids",
+            f"imageTag={sha}",
+        )["imageDetails"][0]
+        digest = detail["imageDigest"]
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise RuntimeError("ECR returned an invalid digest.")
+        manifest_digest, config_digest = resolve_runtime_digests(
+            repository,
+            digest,
+            lambda reference: cloud.run(
+                [
+                    "docker",
+                    "--config",
+                    str(config),
+                    "buildx",
+                    "imagetools",
+                    "inspect",
+                    "--raw",
+                    reference,
+                ]
+            ),
+        )
     finally:
         (config / "config.json").unlink(missing_ok=True)
-    detail = cloud.aws(
-        "ecr",
-        "describe-images",
-        "--repository-name",
-        outputs["RepositoryName"],
-        "--image-ids",
-        f"imageTag={sha}",
-    )["imageDetails"][0]
-    digest = detail["imageDigest"]
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-        raise RuntimeError("ECR returned an invalid digest.")
     result = {
         "account": cloud.args.account,
         "source_sha": sha,
         "image": f"{repository}@{digest}",
+        "runtime_manifest_digest": manifest_digest,
+        "runtime_config_digest": config_digest,
     }
     save("image.json", result)
     return result
@@ -607,8 +651,144 @@ def apply(cloud):
     return {"image": image, "rolled_out": True, "inference_verified": False}
 
 
+def resolve_runtime_digests(repository, digest, inspect):
+    manifest = json.loads(inspect(repository + "@" + digest))
+    if "manifests" in manifest:
+        candidates = [
+            m["digest"]
+            for m in manifest["manifests"]
+            if m.get("platform", {}).get("os") == "linux"
+            and m.get("platform", {}).get("architecture") == "amd64"
+        ]
+        if len(candidates) != 1:
+            raise RuntimeError(
+                "Registry index must contain exactly one Linux/amd64 runtime."
+            )
+        digest = candidates[0]
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise RuntimeError("Invalid platform manifest digest.")
+        manifest = json.loads(inspect(repository + "@" + digest))
+    config = manifest["config"]["digest"]
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", config):
+        raise RuntimeError("Invalid runtime config digest.")
+    return digest, config
+
+
+def validate_runtime(deployment, replicas, pods, endpoints, receipt):
+    expected = receipt["image"]
+    if deployment["spec"]["template"]["spec"]["containers"][0]["image"] != expected:
+        raise RuntimeError(
+            "Deployment image differs from the published release receipt."
+        )
+    deployment_uid = deployment["metadata"]["uid"]
+    replica_uids = {
+        r["metadata"]["uid"]
+        for r in replicas["items"]
+        if any(
+            o.get("controller")
+            and o.get("kind") == "Deployment"
+            and o.get("uid") == deployment_uid
+            for o in r["metadata"].get("ownerReferences", [])
+        )
+    }
+    owned = [
+        p
+        for p in pods["items"]
+        if not p["metadata"].get("deletionTimestamp")
+        and any(
+            o.get("controller")
+            and o.get("kind") == "ReplicaSet"
+            and o.get("uid") in replica_uids
+            for o in p["metadata"].get("ownerReferences", [])
+        )
+    ]
+    if len(owned) != 1:
+        raise RuntimeError("Exactly one owned runtime pod is required.")
+    pod = owned[0]
+    statuses = [
+        s for s in pod["status"].get("containerStatuses", []) if s["name"] == "iris"
+    ]
+    if (
+        pod["status"].get("phase") != "Running"
+        or not any(
+            c["type"] == "Ready" and c["status"] == "True"
+            for c in pod["status"].get("conditions", [])
+        )
+        or len(statuses) != 1
+        or not statuses[0].get("ready")
+        or pod["spec"]["containers"][0]["image"] != expected
+    ):
+        raise RuntimeError(
+            "The owned Iris container must be Ready on the expected image."
+        )
+    allowed = {
+        expected.split("@")[1],
+        receipt["runtime_manifest_digest"],
+        receipt["runtime_config_digest"],
+    }
+    if any(not re.fullmatch(r"sha256:[0-9a-f]{64}", d) for d in allowed):
+        raise RuntimeError("Release receipt lacks valid runtime digest identities.")
+    image_id = statuses[0].get("imageID", "")
+    match = re.search(r"sha256:[0-9a-f]{64}$", image_id)
+    if not match or match[0] not in allowed:
+        raise RuntimeError("Runtime image ID differs from the published OCI image.")
+    pod_uid = pod["metadata"]["uid"]
+    ready = any(
+        e.get("conditions", {}).get("ready") is True
+        and not e.get("conditions", {}).get("terminating", False)
+        and e.get("targetRef", {}).get("kind") == "Pod"
+        and e["targetRef"].get("uid") == pod_uid
+        and e.get("addresses")
+        for s in endpoints["items"]
+        for e in s.get("endpoints", [])
+    )
+    if not ready:
+        raise RuntimeError(
+            "Service has no ready endpoint for the verified runtime pod."
+        )
+    return {
+        "pod_uid": pod_uid,
+        "pod_name": pod["metadata"]["name"],
+        "image_id": image_id,
+        "ready_service_endpoint": True,
+    }
+
+
+@contextmanager
+def port_forward(argv):
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as output:
+        process = None
+        try:
+            process = subprocess.Popen(
+                argv, stdout=output, stderr=subprocess.STDOUT, shell=False
+            )
+            yield process
+        except (RuntimeError, OSError):
+            output.seek(0)
+            record_failure(
+                argv, process.poll() if process else "start-failed", output.read()
+            )
+            raise
+        finally:
+            if process is not None and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+
+
 def verify(cloud):
-    cloud.stack()
+    _, outputs = cloud.stack()
+    receipt = read_json(cloud.args.image_receipt)
+    if receipt.get("account") != cloud.args.account or not re.fullmatch(
+        re.escape(outputs["RepositoryUri"]) + r"@sha256:[0-9a-f]{64}",
+        receipt.get("image", ""),
+    ):
+        raise RuntimeError(
+            "Expected published image receipt is required for verification."
+        )
     cloud.kubectl(
         "-n",
         "strawhats",
@@ -639,42 +819,59 @@ def verify(cloud):
     ):
         raise RuntimeError("Cloud workload differs from the approved hardened runtime.")
 
-    def forwarded_smoke():
+    def runtime_state():
+        current = json.loads(
+            cloud.kubectl("-n", "strawhats", "get", "deployment", "iris", "-o", "json")
+        )
+        replicas = json.loads(
+            cloud.kubectl(
+                "-n", "strawhats", "get", "replicasets", "-l", "app=iris", "-o", "json"
+            )
+        )
+        pods = json.loads(
+            cloud.kubectl(
+                "-n", "strawhats", "get", "pods", "-l", "app=iris", "-o", "json"
+            )
+        )
+        endpoints = json.loads(
+            cloud.kubectl(
+                "-n",
+                "strawhats",
+                "get",
+                "endpointslices",
+                "-l",
+                "kubernetes.io/service-name=iris",
+                "-o",
+                "json",
+            )
+        )
+        return validate_runtime(current, replicas, pods, endpoints, receipt)
+
+    def forwarded_smoke(pod_name):
         # Ask the OS for a free port; fail if another process wins the bind race.
         with socket.socket() as bound:
             bound.bind(("127.0.0.1", 0))
             port = bound.getsockname()[1]
-        process = subprocess.Popen(
-            [
-                "kubectl",
-                "--context",
-                cloud.context,
-                "--kubeconfig",
-                str(KUBECONFIG),
-                "-n",
-                "strawhats",
-                "port-forward",
-                "service/iris",
-                f"{port}:80",
-                "--address",
-                "127.0.0.1",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            shell=False,
-        )
-        try:
+        argv = [
+            "kubectl",
+            "--context",
+            cloud.context,
+            "--kubeconfig",
+            str(KUBECONFIG),
+            "-n",
+            "strawhats",
+            "port-forward",
+            f"pod/{pod_name}",
+            f"{port}:8000",
+            "--address",
+            "127.0.0.1",
+        ]
+        with port_forward(argv) as process:
             wait_for_http(f"http://127.0.0.1:{port}", timeout=30, process=process)
             return verify_iris(f"http://127.0.0.1:{port}")
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
 
-    before = forwarded_smoke()
+    before_state = runtime_state()
+    before = forwarded_smoke(before_state["pod_name"])
     cloud.kubectl("-n", "strawhats", "rollout", "restart", "deployment/iris")
     cloud.kubectl(
         "-n",
@@ -685,12 +882,17 @@ def verify(cloud):
         "--timeout=180s",
         timeout=200,
     )
-    after = forwarded_smoke()
+    after_state = runtime_state()
+    if before_state["pod_uid"] == after_state["pod_uid"]:
+        raise RuntimeError("Restart did not replace the verified Iris pod.")
+    after = forwarded_smoke(after_state["pod_name"])
     return {
         "context": cloud.context,
         "image": container["image"],
         "before_restart": before,
         "after_restart": after,
+        "runtime_before_restart": before_state,
+        "runtime_after_restart": after_state,
     }
 
 
