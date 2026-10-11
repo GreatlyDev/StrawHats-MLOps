@@ -120,6 +120,8 @@ The model image runs as UID 10001 and exposes `/health`, `/predict`, and `/metri
 
 The fixed one-replica workload in `infra/kubernetes/iris` renders with `kubectl kustomize infra/kubernetes/iris`. Use an immutable registry digest before applying it to a cloud cluster.
 
+The [EKS release instructions](infra/README.md) cover the prepared one-worker AWS template and guarded Python commands. Cloud creation is deferred until the presentation window and usage budget are approved. No AWS runtime or public cloud endpoint is verified yet.
+
 `backend/Dockerfile` is a separate orchestrator API image. It needs persistent storage for `/app/.local` and runtime environment secrets. It does not include kubectl. Do not deploy the current management API publicly until authentication/authorization, request budgets, shared persistence, and production CORS are implemented.
 
 For a future Vercel frontend project, select `frontend` as the root directory, Vite as the framework, `npm run build`, and output directory `dist`. Set `VITE_API_BASE_URL` to the verified HTTPS backend origin before building. Only public configuration belongs in Vite variables. The Kubernetes operator and model workloads run in Kubernetes.

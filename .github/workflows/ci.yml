@@ -30,9 +30,9 @@ jobs:
       - name: Check dependency compatibility
         run: python -m pip check
       - name: Lint backend
-        run: python -m ruff check backend
+        run: python -m ruff check backend scripts/cloud
       - name: Check backend formatting
-        run: python -m ruff format --check backend
+        run: python -m ruff format --check backend scripts/cloud
       - name: Test backend
         run: python -m pytest backend/tests -q --disable-plugin-autoload
 
