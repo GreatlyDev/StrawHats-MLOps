@@ -93,6 +93,7 @@ def connect_local_cluster():
         from kubernetes.client.exceptions import ApiException
         from kubernetes.config.config_exception import ConfigException
         from urllib3.exceptions import HTTPError
+        from urllib3.util.retry import Retry
     except ImportError:
         raise HTTPException(
             503, "Install backend/requirements-operator.txt to use local Iris controls."
@@ -101,6 +102,8 @@ def connect_local_cluster():
     try:
         configuration = client.Configuration()
         configuration.proxy = None  # Local cluster traffic must never use a proxy.
+        # Refuse redirects before any connection pools cache a retry policy.
+        configuration.retries = Retry(total=3, redirect=0, raise_on_redirect=False)
         sdk = config.new_client_from_config(
             context=CONTEXT,
             client_configuration=configuration,

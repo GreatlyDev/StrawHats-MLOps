@@ -72,23 +72,27 @@ def predict_with_service(cluster, resource, data: DeployedPredictionInput) -> di
             "The local Iris Service is not the operator's verified target. Refresh and retry.",
         )
     # Generated Service proxy methods omit the body; use the SDK's JSON transport.
-    result = cluster.sdk.call_api(
-        "/api/v1/namespaces/{namespace}/services/{name}/proxy/{path}",
-        "POST",
-        path_params={"namespace": NAMESPACE, "name": f"{NAME}:8000", "path": "predict"},
-        header_params={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-        body=data.model_dump(),
-        response_type="object",
-        auth_settings=["BearerToken"],
-        _return_http_data_only=True,
-        _request_timeout=TIMEOUT,
-    )
     try:
+        result = cluster.sdk.call_api(
+            "/api/v1/namespaces/{namespace}/services/{name}/proxy/{path}",
+            "POST",
+            path_params={
+                "namespace": NAMESPACE,
+                "name": f"{NAME}:8000",
+                "path": "predict",
+            },
+            header_params={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            body=data.model_dump(),
+            response_type="object",
+            auth_settings=["BearerToken"],
+            _return_http_data_only=True,
+            _request_timeout=TIMEOUT,
+        )
         return IrisResult.model_validate(result).model_dump()
-    except ValidationError:
+    except (ValidationError, UnicodeDecodeError):
         raise HTTPException(
             502,
             "The deployed Iris Service returned an invalid prediction. No result was substituted.",

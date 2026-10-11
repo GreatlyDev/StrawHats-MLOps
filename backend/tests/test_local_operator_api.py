@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 from urllib3 import HTTPResponse
+from urllib3.connectionpool import HTTPConnectionPool
 from urllib3.exceptions import ReadTimeoutError
 
 from backend.app.main import create_app
@@ -676,3 +677,60 @@ def test_prediction_guards_run_before_credentials(deployed_service, headers, exp
     )
     assert result.status_code == expected
     assert cluster.loaded_contexts == calls == []
+
+
+def test_service_redirect_never_contacts_another_host(deployed_service, monkeypatch):
+    api, cluster, _, prediction, _ = deployed_service
+    destinations = []
+
+    def connect(**kwargs):
+        configuration = kwargs["client_configuration"]
+        configuration.host = "https://127.0.0.1:6443"
+        cluster.sdk.close()
+        cluster.sdk = client.ApiClient(configuration)
+        # Exercise the cached pool too, as earlier readiness reads use this host.
+        cluster.sdk.rest_client.pool_manager.connection_from_host(
+            "127.0.0.1", port=6443, scheme="https"
+        )
+        return cluster.sdk
+
+    monkeypatch.setattr(config, "new_client_from_config", connect)
+
+    def reply(pool, connection, method, url, **kwargs):
+        destinations.append((pool.host, method))
+        if pool.host == "127.0.0.1":
+            return HTTPResponse(
+                body=b'{"detail":"redirect"}',
+                status=307,
+                headers={"Location": "http://external.invalid/other"},
+                retries=kwargs["retries"],
+            )
+        return HTTPResponse(
+            body=json.dumps(prediction).encode(),
+            status=200,
+            headers={"Content-Type": "application/json"},
+            retries=kwargs["retries"],
+        )
+
+    monkeypatch.setattr(HTTPConnectionPool, "_make_request", reply)
+    response = api.post("/api/local-iris/predict", json={"features": [1, 2, 3, 4]})
+    assert response.status_code == 503
+    assert destinations == [("127.0.0.1", "POST")]
+    assert api.get("/api/events").json() == []
+
+
+def test_invalid_utf8_model_response_is_a_sanitized_gateway_error(
+    deployed_service, monkeypatch
+):
+    api, cluster, _, _, _ = deployed_service
+    monkeypatch.setattr(
+        cluster.sdk.rest_client.pool_manager,
+        "request",
+        lambda *args, **kwargs: HTTPResponse(
+            body=b"\xffcredential=do-not-expose", status=200
+        ),
+    )
+    response = api.post("/api/local-iris/predict", json={"features": [1, 2, 3, 4]})
+    assert response.status_code == 502
+    assert "do-not-expose" not in response.text
+    assert api.get("/api/events").json() == []
