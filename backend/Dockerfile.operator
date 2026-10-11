@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY backend/requirements-operator.txt backend/requirements-operator.txt
+RUN pip install --no-cache-dir -r backend/requirements-operator.txt && useradd --uid 10001 --create-home appuser
+COPY backend/__init__.py backend/
+COPY backend/model_operator backend/model_operator
+USER 10001
+CMD ["python", "-m", "backend.model_operator"]
