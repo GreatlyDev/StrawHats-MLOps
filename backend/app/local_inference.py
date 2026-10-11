@@ -1,0 +1,95 @@
+"""Validate inputs and results for inference through the fixed local Iris Service."""
+
+from math import isclose
+from typing import Annotated, Literal
+
+from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from .local_cluster import GROUP, NAME, NAMESPACE, TIMEOUT, VERSION
+
+Measurement = Annotated[float, Field(gt=0, le=30, allow_inf_nan=False, strict=True)]
+Probability = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False, strict=True)]
+IrisLabel = Literal["setosa", "versicolor", "virginica"]
+
+
+class DeployedPredictionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    features: list[Measurement] = Field(min_length=4, max_length=4)
+
+
+class IrisResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: IrisLabel
+    confidence: Probability
+    probabilities: dict[IrisLabel, Probability]
+    latency_ms: float = Field(gt=0, allow_inf_nan=False, strict=True)
+
+    @model_validator(mode="after")
+    def consistent_probabilities(self):
+        values = self.probabilities
+        if (
+            set(values) != {"setosa", "versicolor", "virginica"}
+            or not isclose(sum(values.values()), 1, abs_tol=1e-6)
+            or not isclose(self.confidence, values[self.label], abs_tol=1e-6)
+            or values[self.label] < max(values.values())
+        ):
+            raise ValueError("Invalid Iris probabilities")
+        return self
+
+
+def predict_with_service(cluster, resource, data: DeployedPredictionInput) -> dict:
+    from kubernetes import client
+
+    service = cluster.sdk.sanitize_for_serialization(
+        client.CoreV1Api(cluster.sdk).read_namespaced_service(
+            NAME, NAMESPACE, _request_timeout=TIMEOUT
+        )
+    )
+    uid = resource["metadata"]["uid"]
+    spec = service.get("spec", {})
+    owned = any(
+        owner.get("uid") == uid
+        and owner.get("kind") == "ModelDeployment"
+        and owner.get("name") == NAME
+        and owner.get("apiVersion") == f"{GROUP}/{VERSION}"
+        and owner.get("controller") is True
+        for owner in service.get("metadata", {}).get("ownerReferences", [])
+    )
+    if (
+        not owned
+        or spec.get("type") != "ClusterIP"
+        or spec.get("selector") != {"mlops.strawhats.dev/owner-uid": uid}
+        or not any(
+            port.get("port") == 8000
+            and port.get("targetPort") == "http"
+            and port.get("protocol") == "TCP"
+            for port in spec.get("ports", [])
+        )
+    ):
+        raise HTTPException(
+            409,
+            "The local Iris Service is not the operator's verified target. Refresh and retry.",
+        )
+    # Generated Service proxy methods omit the body; use the SDK's JSON transport.
+    result = cluster.sdk.call_api(
+        "/api/v1/namespaces/{namespace}/services/{name}/proxy/{path}",
+        "POST",
+        path_params={"namespace": NAMESPACE, "name": f"{NAME}:8000", "path": "predict"},
+        header_params={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        body=data.model_dump(),
+        response_type="object",
+        auth_settings=["BearerToken"],
+        _return_http_data_only=True,
+        _request_timeout=TIMEOUT,
+    )
+    try:
+        return IrisResult.model_validate(result).model_dump()
+    except ValidationError:
+        raise HTTPException(
+            502,
+            "The deployed Iris Service returned an invalid prediction. No result was substituted.",
+        ) from None

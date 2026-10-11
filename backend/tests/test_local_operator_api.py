@@ -1,12 +1,16 @@
 """The dashboard must never imply a disabled local controller is available."""
 
+import json
 import os
 from copy import deepcopy
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
+from urllib3 import HTTPResponse
+from urllib3.exceptions import ReadTimeoutError
 
 from backend.app.main import create_app
 
@@ -29,7 +33,7 @@ def test_local_status_is_disabled_without_explicit_enablement(tmp_path):
         assert response.json()["rollback_available"] is False
 
 
-@pytest.mark.parametrize("action", ["deploy", "scale", "rollback"])
+@pytest.mark.parametrize("action", ["deploy", "scale", "rollback", "predict"])
 def test_disabled_actions_do_not_change_the_workspace(tmp_path, action):
     with local_client(tmp_path) as api:
         before = api.get("/api/overview").json()
@@ -451,3 +455,224 @@ def test_unexpected_kubernetes_proxy_is_refused_before_requests(enabled_api):
     response = api.post("/api/local-iris/deploy", json={"replicas": 1})
     assert response.status_code == 503
     assert cluster.writes == []
+
+
+@pytest.fixture
+def deployed_service(enabled_api, monkeypatch):
+    api, cluster = enabled_api
+    service = {
+        "metadata": {
+            "ownerReferences": [
+                {
+                    "uid": "iris-uid",
+                    "kind": "ModelDeployment",
+                    "name": "iris",
+                    "apiVersion": "mlops.strawhats.dev/v1alpha1",
+                    "controller": True,
+                }
+            ],
+        },
+        "spec": {
+            "type": "ClusterIP",
+            "selector": {"mlops.strawhats.dev/owner-uid": "iris-uid"},
+            "ports": [{"port": 8000, "targetPort": "http", "protocol": "TCP"}],
+        },
+    }
+    prediction = {
+        "label": "virginica",
+        "confidence": 0.85,
+        "probabilities": {"setosa": 0.05, "versicolor": 0.1, "virginica": 0.85},
+        "latency_ms": 2.5,
+    }
+    calls = []
+
+    def read_service(name, namespace, **kwargs):
+        assert (name, namespace) == ("iris", "strawhats-operator-local")
+        return deepcopy(service)
+
+    monkeypatch.setattr(cluster, "read_namespaced_service", read_service, raising=False)
+    monkeypatch.setattr(client, "CoreV1Api", lambda sdk: cluster)
+
+    def relay(method, url, **kwargs):
+        calls.append((method, unquote(url), kwargs))
+        return HTTPResponse(
+            body=json.dumps(prediction).encode(),
+            status=200,
+            headers={"Content-Type": "application/json"},
+        )
+
+    monkeypatch.setattr(cluster.sdk.rest_client.pool_manager, "request", relay)
+    return api, cluster, service, prediction, calls
+
+
+def test_prediction_reaches_fixed_service_without_workspace_artifacts(deployed_service):
+    api, cluster, _, prediction, calls = deployed_service
+    before = api.get("/api/overview").json()
+    response = api.post(
+        "/api/local-iris/predict", json={"features": [6.3, 3.3, 6.0, 2.5]}
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        **prediction,
+        "source": "kubernetes",
+        "context": "docker-desktop",
+        "namespace": "strawhats-operator-local",
+        "service": "iris",
+        "image": "strawhats-iris:milestone-one",
+        "generation": 7,
+    }
+    assert len(calls) == 1
+    method, url, options = calls[0]
+    assert method == "POST"
+    assert (
+        url
+        == "https://127.0.0.1:6443/api/v1/namespaces/strawhats-operator-local/services/iris:8000/proxy/predict"
+    )
+    assert json.loads(options["body"]) == {"features": [6.3, 3.3, 6.0, 2.5]}
+    assert options["headers"]["Content-Type"] == "application/json"
+    assert options["timeout"].connect_timeout == 3
+    assert options["timeout"].read_timeout == 5
+    assert cluster.loaded_contexts == ["docker-desktop"]
+    assert cluster.writes == []
+    assert api.get("/api/overview").json() == before
+    assert "Kubernetes" in api.get("/api/events").json()[0]["title"]
+
+
+@pytest.mark.parametrize(
+    "features",
+    [
+        [1, 2, 3],
+        [1, 2, 3, 4, 5],
+        [0, 2, 3, 4],
+        [31, 2, 3, 4],
+        [True, 2, 3, 4],
+        ["1", 2, 3, 4],
+    ],
+)
+def test_invalid_prediction_never_loads_kubernetes(deployed_service, features):
+    api, cluster, _, _, calls = deployed_service
+    assert (
+        api.post("/api/local-iris/predict", json={"features": features}).status_code
+        == 422
+    )
+    assert cluster.loaded_contexts == calls == []
+
+
+def test_prediction_cannot_select_another_service(deployed_service):
+    api, cluster, _, _, calls = deployed_service
+    response = api.post(
+        "/api/local-iris/predict", json={"features": [1, 2, 3, 4], "service": "other"}
+    )
+    assert response.status_code == 422
+    assert cluster.loaded_contexts == calls == []
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["absent", "Pending", "Failed", "Conflict", "unobserved", "no-replicas", "offline"],
+)
+def test_prediction_requires_current_ready_deployment(deployed_service, state):
+    api, cluster, _, _, calls = deployed_service
+    if state == "absent":
+        cluster.resource = None
+    elif state == "offline":
+        cluster.controller_ready = False
+    elif state == "unobserved":
+        cluster.resource["metadata"]["generation"] += 1
+    elif state == "no-replicas":
+        cluster.resource["status"]["readyReplicas"] = 0
+    else:
+        cluster.resource["status"]["phase"] = state
+    response = api.post("/api/local-iris/predict", json={"features": [1, 2, 3, 4]})
+    assert response.status_code == (503 if state == "offline" else 409)
+    assert calls == cluster.writes == []
+    assert api.get("/api/events").json() == []
+
+
+@pytest.mark.parametrize("change", ["owner", "selector", "external", "port"])
+def test_prediction_refuses_an_unrelated_service(deployed_service, change):
+    api, _, service, _, calls = deployed_service
+    if change == "owner":
+        service["metadata"]["ownerReferences"][0]["uid"] = "unrelated"
+    elif change == "selector":
+        service["spec"]["selector"] = {"app": "other"}
+    elif change == "external":
+        service["spec"]["type"] = "ExternalName"
+    else:
+        service["spec"]["ports"][0]["port"] = 9000
+    response = api.post("/api/local-iris/predict", json={"features": [1, 2, 3, 4]})
+    assert response.status_code == 409
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("label", "other"),
+        ("confidence", 2),
+        ("latency_ms", -1),
+        ("probabilities", {"setosa": 0.9}),
+        ("probabilities", {"setosa": 0.1, "versicolor": 0.1, "virginica": 0.1}),
+    ],
+)
+def test_bad_model_response_is_not_a_success(deployed_service, field, value):
+    api, _, _, prediction, _ = deployed_service
+    prediction[field] = value
+    response = api.post("/api/local-iris/predict", json={"features": [1, 2, 3, 4]})
+    assert response.status_code == 502
+    assert api.get("/api/events").json() == []
+
+
+def test_prediction_timeout_does_not_fall_back_or_leak_details(
+    deployed_service, monkeypatch
+):
+    api, cluster, _, _, _ = deployed_service
+
+    def timeout(*args, **kwargs):
+        raise ReadTimeoutError(None, None, "credential=do-not-expose")
+
+    monkeypatch.setattr(cluster.sdk.rest_client.pool_manager, "request", timeout)
+    response = api.post("/api/local-iris/predict", json={"features": [1, 2, 3, 4]})
+    assert response.status_code == 503
+    assert "do-not-expose" not in response.text
+    assert api.get("/api/events").json() == []
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "1e400"])
+def test_nonfinite_measurement_returns_validation_error_without_kubernetes(
+    deployed_service, value
+):
+    api, cluster, _, _, calls = deployed_service
+    response = api.post(
+        "/api/local-iris/predict",
+        content='{"features": [' + value + ", 2, 3, 4]}",
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+    assert cluster.loaded_contexts == calls == []
+
+
+def test_prediction_after_rollback_credits_the_restored_image(deployed_service):
+    api, cluster, _, _, calls = deployed_service
+    cluster.resource["spec"].update(mode="Rollback", image="strawhats-iris:missing")
+    cluster.resource["status"]["phase"] = "RolledBack"
+    result = api.post("/api/local-iris/predict", json={"features": [1, 2, 3, 4]})
+    assert result.status_code == 200
+    assert result.json()["image"] == "strawhats-iris:milestone-one"
+    assert len(calls) == 1
+    assert cluster.writes == []
+
+
+@pytest.mark.parametrize(
+    "headers,expected",
+    [({"Origin": "https://evil.example"}, 403), ({"Content-Type": "text/plain"}, 415)],
+)
+def test_prediction_guards_run_before_credentials(deployed_service, headers, expected):
+    api, cluster, _, _, calls = deployed_service
+    result = api.post(
+        "/api/local-iris/predict",
+        content='{"features":[1,2,3,4]}',
+        headers={"Content-Type": "application/json", **headers},
+    )
+    assert result.status_code == expected
+    assert cluster.loaded_contexts == calls == []
