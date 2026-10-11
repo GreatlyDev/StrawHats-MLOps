@@ -4,16 +4,19 @@ import { FileCode, Download, Copy, Check, Layers } from 'lucide-react';
 import { request } from '../api';
 import type { Model, DeploymentPlan, Cluster } from '../types';
 import { Badge, Empty, ErrorNotice, date } from './shared';
+import LocalIris from './LocalIris';
 export default function Deployments({
   models,
   plans,
   cluster,
   refresh,
+  isActive,
 }: {
   models: Model[];
   plans: DeploymentPlan[];
   cluster: Cluster;
   refresh: () => Promise<void>;
+  isActive: boolean;
 }) {
   const [selected, setSelected] = useState('');
   const [modelId, setModelId] = useState('');
@@ -67,6 +70,7 @@ export default function Deployments({
   }
   return (
     <>
+      <LocalIris isActive={isActive} refresh={refresh} />
       <div className="section-toolbar">
         <div>
           <h2>Prepare your next deployment</h2>

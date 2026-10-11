@@ -25,8 +25,8 @@ const navigation = [
   { id: 'models', label: 'Models', short: 'Models', icon: Box },
   {
     id: 'deployments',
-    label: 'Deployment previews',
-    short: 'Previews',
+    label: 'Deployments',
+    short: 'Deploy',
     icon: Layers,
   },
   { id: 'assistant', label: 'Assistant', short: 'Assistant', icon: Radio },
@@ -152,8 +152,8 @@ export default function App() {
             <small>A COURSE OF YOUR OWN</small>
             <strong>Build. Test. Set sail.</strong>
             <p>
-              Your models, your decisions. Every deployment starts with a
-              preview.
+              Your models, your decisions. Review your plans and manage Iris
+              locally.
             </p>
           </div>
           <div className="workspace-identity">
@@ -253,6 +253,7 @@ export default function App() {
                   plans={data.plans}
                   cluster={data.cluster}
                   refresh={refresh}
+                  isActive={view === 'deployments'}
                 />
               </div>
               <div hidden={view !== 'assistant'}>
