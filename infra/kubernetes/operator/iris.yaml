@@ -1,0 +1,12 @@
+apiVersion: mlops.strawhats.dev/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: iris
+  namespace: strawhats-operator-local
+spec:
+  mode: Deploy
+  image: strawhats-iris:milestone-one
+  imagePullPolicy: Never
+  replicas: 1
+  cpuMillicores: 250
+  memoryMi: 256
