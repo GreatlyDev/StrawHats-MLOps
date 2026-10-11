@@ -5,6 +5,34 @@ class AssistantUnavailable(Exception):
     pass
 
 
+def _response_text(content: object) -> str:
+    if isinstance(content, str) and content.strip():
+        return content
+
+    if isinstance(content, list):
+        segments = []
+        for part in content:
+            if isinstance(part, str):
+                text = part
+            elif isinstance(part, dict) and part.get("type", "text") in (
+                "text",
+                "output_text",
+            ):
+                text = part.get("text")
+                if not isinstance(text, str):
+                    continue
+            else:
+                continue
+            if text.strip():
+                segments.append(text)
+        if segments:
+            return "\n".join(segments)
+
+    raise AssistantUnavailable(
+        "The AI provider returned an empty or unsupported response. Please retry."
+    )
+
+
 def answer(
     messages: list[dict],
     models: list[dict],
@@ -58,11 +86,7 @@ def answer(
             timeout=30,
             max_retries=0,
         ).invoke([{"role": "system", "content": system}, *messages])
-        if isinstance(response.content, str):
-            return response.content
-        return "\n".join(
-            part.get("text", "") for part in response.content if isinstance(part, dict)
-        )
+        return _response_text(response.content)
     except AuthenticationError as exc:
         raise AssistantUnavailable(
             "The AI provider did not accept the server API key. Check the OpenAI project credentials."
