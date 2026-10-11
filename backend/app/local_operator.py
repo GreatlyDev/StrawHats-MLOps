@@ -1,5 +1,6 @@
 """Local-only Iris controls; the operator owns the underlying workloads."""
 
+import json
 from ipaddress import ip_address
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -8,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.model_operator.spec import choose_target, parse_target
 
 from .local_cluster import CONTEXT, IMAGE, NAME, NAMESPACE, connect_local_cluster
+from .local_inference import DeployedPredictionInput, predict_with_service
 
 
 class EmptyAction(BaseModel):
@@ -204,5 +206,49 @@ def local_operator_router(enabled: bool, record_event) -> APIRouter:
     @router.post("/rollback", status_code=202, dependencies=[Depends(guard)])
     def rollback(data: EmptyAction):
         return apply("rollback")
+
+    async def prediction_guard(request: Request):
+        guard(request)
+        # FastAPI echoes invalid inputs in validation errors; NaN/Inf cannot be
+        # serialized there. Reject non-finite JSON before model validation.
+        try:
+            json.dumps(await request.json(), allow_nan=False)
+        except ValueError:
+            raise HTTPException(
+                422, "Prediction measurements must be finite JSON numbers."
+            ) from None
+
+    @router.post("/predict", dependencies=[Depends(prediction_guard)])
+    def predict(data: DeployedPredictionInput):
+        with connect_local_cluster() as cluster:
+            if not cluster.controller_ready():
+                raise HTTPException(
+                    503, "Start the local operator before predicting with Iris."
+                )
+            resource = cluster.resource()
+            status = observed_status(resource, True)
+            if (
+                status["phase"] not in ("Ready", "RolledBack")
+                or status["ready_replicas"] < 1
+            ):
+                raise HTTPException(
+                    409,
+                    "Prediction requires a current ready Iris deployment. Refresh or deploy first.",
+                )
+            result = {
+                **predict_with_service(cluster, resource, data),
+                "source": "kubernetes",
+                "context": CONTEXT,
+                "namespace": NAMESPACE,
+                "service": NAME,
+                "image": status["image"],
+                "generation": status["generation"],
+            }
+        record_event(
+            "prediction",
+            "Kubernetes Iris prediction completed",
+            f"{NAMESPACE}/{NAME} · generation {result['generation']} · {result['label']}",
+        )
+        return result
 
     return router

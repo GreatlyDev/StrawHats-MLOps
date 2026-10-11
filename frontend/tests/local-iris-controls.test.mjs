@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { localIrisControls } from '../src/local-iris-controls.ts';
+import {
+  localIrisControls,
+  canPredictLocalIris,
+} from '../src/local-iris-controls.ts';
 
 function readyStatus(extra = {}) {
   return {
@@ -108,4 +111,25 @@ test('an absent model can deploy but cannot scale or roll back', () => {
     ),
     { deploy: true, scale: false, rollback: false },
   );
+});
+
+test('deployed predictions require an observed ready replica and current status', () => {
+  assert.equal(canPredictLocalIris(readyStatus(), false, false), true);
+  assert.equal(
+    canPredictLocalIris(readyStatus({ phase: 'RolledBack' }), false, false),
+    true,
+  );
+  for (const status of [
+    null,
+    readyStatus({ phase: 'Pending' }),
+    readyStatus({ phase: 'Failed' }),
+    readyStatus({ generation: 4 }),
+    readyStatus({ ready_replicas: 0 }),
+    readyStatus({ connected: false }),
+    readyStatus({ operator_ready: false }),
+  ]) {
+    assert.equal(canPredictLocalIris(status, false, false), false);
+  }
+  assert.equal(canPredictLocalIris(readyStatus(), true, false), false);
+  assert.equal(canPredictLocalIris(readyStatus(), false, true), false);
 });

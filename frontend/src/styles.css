@@ -1192,6 +1192,11 @@ progress::-moz-progress-bar {
   color: var(--muted);
   margin: 16px 0 0;
 }
+.local-iris-prediction {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+  margin-top: 24px;
+}
 .local-iris-card .error,
 .local-iris-card .soft-note {
   margin-top: 16px;

@@ -26,3 +26,14 @@ export function localIrisControls(
     rollback: available && Boolean(status?.rollback_available),
   };
 }
+
+export function canPredictLocalIris(
+  status: LocalIris | null,
+  stale: boolean,
+  busy: boolean,
+) {
+  return (
+    localIrisControls(status, stale, busy).scale &&
+    Boolean(status && status.ready_replicas > 0)
+  );
+}

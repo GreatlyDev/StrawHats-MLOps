@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Rocket,
   RefreshCw,
@@ -7,9 +7,10 @@ import {
   Server,
 } from 'lucide-react';
 import { request } from '../api';
-import { localIrisControls } from '../local-iris-controls';
+import { canPredictLocalIris, localIrisControls } from '../local-iris-controls';
 import type { LocalIris as IrisStatus } from '../types';
 import { Badge, ErrorNotice } from './shared';
+import DeployedIrisPrediction from './DeployedIrisPrediction';
 
 type Action = 'deploy' | 'scale' | 'rollback';
 const phaseLabel = {
@@ -32,7 +33,11 @@ export default function LocalIris({
 }) {
   const [status, setStatus] = useState<IrisStatus | null>(null);
   const [replicas, setReplicas] = useState(1);
-  const [busy, setBusy] = useState<Action | null>(null);
+  const [busy, setBusy] = useState<Action | 'predict' | null>(null);
+  const predictionBusyChanged = useCallback(
+    (running: boolean) => setBusy(running ? 'predict' : null),
+    [],
+  );
   const [reading, setReading] = useState(false);
   const [stale, setStale] = useState(true);
   const [readError, setReadError] = useState('');
@@ -242,6 +247,15 @@ export default function LocalIris({
       )}
       {readError && <ErrorNotice message={readError} />}
       {actionError && <ErrorNotice message={actionError} />}
+      {isActive && (
+        <DeployedIrisPrediction
+          key={`${status?.generation}:${status?.image}`}
+          available={canPredictLocalIris(status, stale, Boolean(busy))}
+          busy={Boolean(busy)}
+          onBusyChange={predictionBusyChanged}
+          refresh={refresh}
+        />
+      )}
     </section>
   );
 }
