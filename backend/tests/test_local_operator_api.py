@@ -1,5 +1,6 @@
 """The dashboard must never imply a disabled local controller is available."""
 
+import os
 from copy import deepcopy
 
 import pytest
@@ -412,4 +413,31 @@ def test_repeated_deploy_preserves_a_current_verified_generation(enabled_api):
     assert response.status_code == 202
     assert response.json()["phase"] == "Ready"
     assert response.json()["generation"] == 7
+    assert cluster.writes == []
+
+
+def test_local_transport_connects_directly_despite_inherited_proxies(monkeypatch):
+    from urllib3 import ProxyManager
+
+    from backend.app.local_cluster import connect_local_cluster
+
+    for variable in ("HTTP_PROXY", "HTTPS_PROXY"):
+        monkeypatch.setenv(variable, "http://proxy.example:8080")
+
+    def load(*args, **kwargs):
+        assert kwargs["context"] == "docker-desktop"
+        kwargs["client_configuration"].host = "https://127.0.0.1:6443"
+
+    monkeypatch.setattr(config, "load_kube_config", load)
+    with connect_local_cluster() as cluster:
+        assert cluster.sdk.configuration.proxy is None
+        assert not isinstance(cluster.sdk.rest_client.pool_manager, ProxyManager)
+    assert os.environ["HTTPS_PROXY"] == "http://proxy.example:8080"
+
+
+def test_unexpected_kubernetes_proxy_is_refused_before_requests(enabled_api):
+    api, cluster = enabled_api
+    cluster.sdk.configuration.proxy = "http://proxy.example:8080"
+    response = api.post("/api/local-iris/deploy", json={"replicas": 1})
+    assert response.status_code == 503
     assert cluster.writes == []

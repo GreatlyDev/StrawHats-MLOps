@@ -99,7 +99,13 @@ def connect_local_cluster():
         ) from None
     sdk = None
     try:
-        sdk = config.new_client_from_config(context=CONTEXT)
+        configuration = client.Configuration()
+        configuration.proxy = None  # Local cluster traffic must never use a proxy.
+        sdk = config.new_client_from_config(
+            context=CONTEXT,
+            client_configuration=configuration,
+            persist_config=False,
+        )
         address = urlsplit(sdk.configuration.host)
         if (
             address.scheme != "https"
@@ -108,10 +114,11 @@ def connect_local_cluster():
             or address.username
             or address.password
             or not sdk.configuration.verify_ssl
+            or sdk.configuration.proxy
         ):
             raise HTTPException(
                 503,
-                "The docker-desktop context must use a verified local HTTPS endpoint.",
+                "The docker-desktop context must use a verified local HTTPS endpoint without a proxy.",
             )
         yield LocalCluster(sdk, client.CustomObjectsApi(sdk), client.AppsV1Api(sdk))
     except ApiException as error:

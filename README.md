@@ -18,7 +18,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 
 ## Features in this release
 
-- One Piece-inspired responsive React dashboard with parchment panels, nautical branding, and Overview, Models, Deployment previews, Assistant, and Activity.
+- One Piece-inspired responsive React dashboard with parchment panels, nautical branding, and Overview, Models, Deployments, Assistant, and Activity.
 - Persistent SQLite model/container registry and timeline.
 - Reproducible Iris classifier with held-out evaluation and real local predictions.
 - Kubernetes Namespace, Deployment, and Service YAML previews with selected resources, replicas, probes, and nonroot settings; copy/download support.
@@ -88,7 +88,7 @@ Open [the dashboard](http://127.0.0.1:5173) and [API documentation](http://127.0
 1. Open Models and select **Train Iris example**.
 2. Inspect the measured held-out accuracy and macro F1.
 3. Run a prediction with measurements `[5.1, 3.5, 1.4, 0.2]`; inspect the label, probabilities, and measured latency.
-4. Open Deployment previews, select a registered model, and enter an image you control. Generate and inspect the YAML. This saves a preview only.
+4. Open Deployments, select a registered model in the manifest configuration, and enter an image you control. Generate and inspect the YAML. This saves a preview only.
 5. Open Overview/Activity to see real counts and recorded events.
 6. Submit a deployment question in Assistant when API credits are available.
 

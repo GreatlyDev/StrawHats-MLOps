@@ -152,8 +152,8 @@ export default function App() {
             <small>A COURSE OF YOUR OWN</small>
             <strong>Build. Test. Set sail.</strong>
             <p>
-              Your models, your decisions. Every deployment starts with a
-              preview.
+              Your models, your decisions. Review your plans and manage Iris
+              locally.
             </p>
           </div>
           <div className="workspace-identity">
