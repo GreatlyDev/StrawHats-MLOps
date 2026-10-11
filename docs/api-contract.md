@@ -7,7 +7,7 @@ Model:
 The metric values above describe the shape, not fixed results. Backend returns measured values.
 - GET /models -> Model[]
 - POST /models/example -> Model (201), duplicate -> 409
-- POST /models -> Model (201); body {"name":"...","version":"1.0.0","framework":"PyTorch","description":"...","image":"ghcr.io/owner/model:v1"}. External models have kind="container", metrics={}, feature_names=[], labels=[].
+- POST /models -> Model (201); body {"name":"...","version":"1.0.0","framework":"PyTorch","description":"...","image":"ghcr.io/owner/model:v1"}. External models have kind="container", metrics={}, feature_names=[], labels=[]. Registration text is trimmed before the existing length checks; required name/version/framework values cannot become blank after trimming, and internal formatting is preserved while description whitespace-only values become empty strings.
 - POST /models/{id}/predict; body {"features":[5.1,3.5,1.4,0.2]} -> {"label":"setosa","confidence":0.99,"probabilities":{"setosa":0.99,"versicolor":0.01,"virginica":0.0},"latency_ms":1.23}
 
 DeploymentPlan:
