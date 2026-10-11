@@ -1,9 +1,11 @@
 # Iris on AWS EKS
 
 This milestone prepares one EKS cluster and one stateless Iris model. **The image
-is verified locally; no AWS runtime has been created or verified.** Operator,
-monitoring, AI resource adjustment, and the public website are later assignment
-milestones. The deployment CLI is owner-operated, not an automatic cloud CI job.
+is verified locally; no AWS runtime has been created or verified.** The
+[local Iris operator](kubernetes/operator/README.md) verifies CRD deployment,
+scaling, and rollback in Docker Desktop Kubernetes. Cloud integration, monitoring,
+AI resource adjustment, and the public website remain later assignment milestones.
+The deployment CLI is owner-operated, not an automatic cloud CI job.
 
 ## Runtime and cost boundary
 

@@ -4,7 +4,7 @@
 
 A model operations dashboard for registering ML models, testing inference, preparing Kubernetes deployment configuration, and asking for deployment guidance through LangChain. This repository is the first local foundation of the group's ML Deployment Orchestrator.
 
-**Status:** the local dashboard and API work. Cloud Kubernetes orchestration, production deployment, the public demo, and demo GIF are not implemented yet.
+**Status:** the local dashboard and API work. A local Kubernetes operator/CRD verifies Iris deployment, scaling, and rollback. UI-to-cluster integration, cloud deployment, the public demo, and demo GIF remain unfinished.
 
 ## Team
 
@@ -26,6 +26,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 - Observed prediction counts/latency and Prometheus endpoints.
 - LangChain/OpenAI guidance with server-only credentials and actionable provider errors.
 - Standalone Iris model service verified in a hardened Linux container.
+- Namespaced Python Kubernetes operator with a bounded ModelDeployment CRD, verified local scaling and explicit rollback; see [local operator setup](infra/kubernetes/operator/README.md).
 
 Container registrations store metadata. The name/version Iris classifier v1.0.0 is reserved for the built-in example. Local inference supports the bundled Iris example; external images require a separately deployed endpoint. Previews do not apply workloads to a cluster.
 
@@ -41,7 +42,8 @@ FastAPI ── SQLite + local trained artifact
   └── LangChain ── OpenAI (only on assistant submission)
 
 Standalone model service: /health, /predict, /metrics
-Future: Kubernetes CRD/operator + Prometheus/Grafana + cloud release
+Local Kubernetes: ModelDeployment CRD → Python operator → Iris Deployment/Service
+Future: UI-to-cluster integration + Prometheus/Grafana + cloud release
 ```
 
 The dashboard does not receive provider keys. Local records and model artifacts live in `.local/`, which is excluded from Git. Prometheus counters reset with the process; dashboard totals persist in SQLite. Median latency covers the last 30 recorded predictions.
@@ -54,7 +56,7 @@ From the repository root on Windows:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r backend\requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements-dev.txt -r backend\requirements-operator.txt
 if (-not (Test-Path .env.local)) { Copy-Item .env.example .env.local }
 cd frontend
 npm.cmd ci

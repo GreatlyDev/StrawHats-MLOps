@@ -148,3 +148,49 @@ def test_crd_has_validated_scale_and_status_contract():
         assert fields[field]["type"] == "integer"
         assert (fields[field]["minimum"], fields[field]["maximum"]) == (low, high)
     assert fields["image"]["pattern"] == r"^\S+$"
+
+
+def test_local_install_is_namespaced_and_least_privilege():
+    documents = list(yaml.safe_load_all((MANIFESTS / "rbac.yaml").read_text()))
+    assert {item["kind"] for item in documents} == {
+        "ServiceAccount",
+        "Role",
+        "RoleBinding",
+    }
+    for item in documents:
+        assert item["metadata"]["namespace"] == "strawhats-operator-local"
+    role = next(item for item in documents if item["kind"] == "Role")
+    for rule in role["rules"]:
+        assert "*" not in rule["verbs"] + rule["resources"] + rule["apiGroups"]
+        assert "secrets" not in rule["resources"]
+        assert "delete" not in rule["verbs"]
+    assert {resource for rule in role["rules"] for resource in rule["resources"]} == {
+        "modeldeployments",
+        "modeldeployments/status",
+        "deployments",
+        "services",
+        "pods",
+        "replicasets",
+        "endpointslices",
+    }
+    binding = next(item for item in documents if item["kind"] == "RoleBinding")
+    assert binding["roleRef"]["kind"] == "Role"
+    assert binding["subjects"][0]["namespace"] == "strawhats-operator-local"
+
+
+def test_controller_install_stays_local_and_excludes_example():
+    controller = yaml.safe_load((MANIFESTS / "controller.yaml").read_text())
+    assert controller["spec"]["replicas"] == 1
+    pod = controller["spec"]["template"]["spec"]
+    assert pod["serviceAccountName"] == "strawhats-model-operator"
+    assert pod["securityContext"]["runAsUser"] == 10001
+    container = pod["containers"][0]
+    assert container["imagePullPolicy"] == "Never"
+    assert container["securityContext"]["readOnlyRootFilesystem"] is True
+    assert container["resources"]["limits"] == {"cpu": "200m", "memory": "128Mi"}
+    assert (
+        container["env"][0]["valueFrom"]["fieldRef"]["fieldPath"]
+        == "metadata.namespace"
+    )
+    kustomization = yaml.safe_load((MANIFESTS / "kustomization.yaml").read_text())
+    assert "iris.yaml" not in kustomization["resources"]
