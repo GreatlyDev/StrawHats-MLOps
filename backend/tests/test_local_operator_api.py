@@ -416,22 +416,32 @@ def test_repeated_deploy_preserves_a_current_verified_generation(enabled_api):
     assert cluster.writes == []
 
 
-def test_local_transport_connects_directly_despite_inherited_proxies(monkeypatch):
+def test_local_transport_connects_directly_despite_inherited_proxies(
+    monkeypatch, tmp_path
+):
+    from kubernetes.config import kube_config
     from urllib3 import ProxyManager
 
     from backend.app.local_cluster import connect_local_cluster
 
     for variable in ("HTTP_PROXY", "HTTPS_PROXY"):
         monkeypatch.setenv(variable, "http://proxy.example:8080")
+    monkeypatch.setattr(
+        kube_config, "KUBE_CONFIG_DEFAULT_LOCATION", str(tmp_path / "absent-kubeconfig")
+    )
+    loaded_contexts = []
 
     def load(*args, **kwargs):
         assert kwargs["context"] == "docker-desktop"
+        assert kwargs["persist_config"] is False
+        loaded_contexts.append(kwargs["context"])
         kwargs["client_configuration"].host = "https://127.0.0.1:6443"
 
-    monkeypatch.setattr(config, "load_kube_config", load)
+    monkeypatch.setattr(kube_config, "load_kube_config", load)
     with connect_local_cluster() as cluster:
         assert cluster.sdk.configuration.proxy is None
         assert not isinstance(cluster.sdk.rest_client.pool_manager, ProxyManager)
+    assert loaded_contexts == ["docker-desktop"]
     assert os.environ["HTTPS_PROXY"] == "http://proxy.example:8080"
 
 
