@@ -70,6 +70,9 @@ def test_conversation_size_role_and_final_user_boundaries_are_preserved():
         )
 
     with pytest.raises(ValidationError):
+        AssistantInput.model_validate({"messages": []})
+
+    with pytest.raises(ValidationError):
         ChatMessage.model_validate({"role": "system", "content": "Not allowed"})
 
     with pytest.raises(ValidationError):
