@@ -60,6 +60,13 @@ class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=4000)
 
+    @field_validator("content")
+    @classmethod
+    def reject_blank_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Message content cannot be blank.")
+        return value
+
 
 class AssistantInput(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=12)
