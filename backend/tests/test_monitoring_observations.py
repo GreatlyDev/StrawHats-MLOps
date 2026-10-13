@@ -355,3 +355,90 @@ def test_observation_cli_rejects_overrides_before_connecting(monitoring, monkeyp
     with pytest.raises(SystemExit) as error:
         monitoring.main()
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"alerts": None},
+        {"alerts": {}},
+        {"alerts": [None]},
+        {"alerts": [{"labels": None}]},
+    ],
+)
+def test_malformed_alert_envelope_cannot_be_healthy_inactive(
+    monitoring, cluster, responses, payload
+):
+    responses["alerts"] = payload
+    with prom_client(responses) as prom, pytest.raises(monitoring.MonitoringError):
+        monitoring.observe(cluster, prom)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "null_vector_row",
+        "wrong_metric_type",
+        "null_targets",
+        "null_groups",
+        "null_rules",
+        "null_scrape_time",
+    ],
+)
+def test_malformed_nested_observations_fail_closed(
+    monitoring, cluster, responses, fault
+):
+    if fault == "null_vector_row":
+        responses["queries"][monitoring.CPU]["result"][0] = None
+    elif fault == "wrong_metric_type":
+        responses["queries"][monitoring.CPU]["result"][0]["metric"] = []
+    elif fault == "null_targets":
+        responses["targets"]["activeTargets"] = None
+    elif fault == "null_groups":
+        responses["rules"]["groups"] = None
+    elif fault == "null_rules":
+        responses["rules"]["groups"][0]["rules"] = None
+    else:
+        responses["targets"]["activeTargets"][0]["lastScrape"] = None
+    with prom_client(responses) as prom:
+        try:
+            result = monitoring.observe(cluster, prom)
+        except monitoring.MonitoringError:
+            return
+    assert result.available is False and result.alert_state == "unavailable"
+
+
+def test_demo_deadline_between_actual_observation_requests(
+    monitoring, cluster, responses
+):
+    from scripts.monitoring.traffic import run_demo
+
+    elapsed = [0.0]
+    starts = []
+
+    def respond(request):
+        starts.append((request.url.path, elapsed[0]))
+        elapsed[0] = 601
+        key = request.url.path.rsplit("/", 1)[-1]
+        data = (
+            responses["queries"][request.url.params["query"]]
+            if key == "query"
+            else responses[key]
+        )
+        return httpx.Response(200, json={"status": "success", "data": data})
+
+    with (
+        httpx.Client(
+            base_url=monitoring.PROMETHEUS_URL, transport=httpx.MockTransport(respond)
+        ) as prom,
+        pytest.raises(monitoring.MonitoringError) as error,
+    ):
+        run_demo(
+            cluster,
+            prom,
+            clock=lambda: elapsed[0],
+            sleep=lambda value: elapsed.__setitem__(0, elapsed[0] + value),
+        )
+    assert starts == [("/api/v1/targets", 0)]
+    assert error.value.evidence["complete"] is False

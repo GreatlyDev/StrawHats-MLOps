@@ -75,10 +75,10 @@ def demo(monkeypatch):
     observations = iter(
         [replace(normal, recent_predictions=0, class_shares={}), normal, firing, normal]
     )
-    monkeypatch.setattr(module, "observe", lambda *_: next(observations))
+    monkeypatch.setattr(module, "observe", lambda *_, **kwargs: next(observations))
     calls = []
 
-    def predict(_, resource, payload):
+    def predict(_, resource, payload, **kwargs):
         assert resource is data
         calls.append((clock.now(), payload.features))
         label = next(
@@ -144,7 +144,7 @@ def test_missing_alert_after_scrape_failure_is_not_recovery(demo, monkeypatch):
             replace(demo.normal, available=False, alert_state="unavailable"),
         ]
     )
-    monkeypatch.setattr(demo.module, "observe", lambda *_: next(states))
+    monkeypatch.setattr(demo.module, "observe", lambda *_, **kwargs: next(states))
     with pytest.raises(MonitoringError) as error:
         run(demo)
     assert error.value.evidence["complete"] is False
@@ -155,7 +155,7 @@ def test_missing_alert_after_scrape_failure_is_not_recovery(demo, monkeypatch):
 
 
 def test_revision_change_stops_traffic(demo, monkeypatch):
-    def changed(*args):
+    def changed(*args, **kwargs):
         result = demo.predict(*args)
         demo.data["metadata"]["generation"] = 9
         demo.data["status"]["observedGeneration"] = 9
@@ -168,7 +168,7 @@ def test_revision_change_stops_traffic(demo, monkeypatch):
 
 
 def test_transport_failure_stops_without_another_request(demo, monkeypatch):
-    def failed(*args):
+    def failed(*args, **kwargs):
         demo.calls.append((demo.clock.now(), args[2].features))
         raise HTTPException(503, "Transport unavailable")
 
@@ -184,7 +184,7 @@ def test_deadline_starts_no_operation_after_inflight_timeout(demo, monkeypatch):
     reads = []
     demo.cluster.resource = lambda: reads.append(demo.clock.now()) or demo.data
 
-    def slow(*args):
+    def slow(*args, **kwargs):
         result = demo.predict(*args)
         demo.clock.value = 601
         return result
@@ -197,7 +197,7 @@ def test_deadline_starts_no_operation_after_inflight_timeout(demo, monkeypatch):
 
 
 def test_success_budget_stops_at_1000_requests(demo, monkeypatch):
-    monkeypatch.setattr(demo.module, "observe", lambda *_: demo.normal)
+    monkeypatch.setattr(demo.module, "observe", lambda *_, **kwargs: demo.normal)
     with pytest.raises(MonitoringError) as error:
         run(demo)
     assert len(demo.calls) == 1000
@@ -206,7 +206,7 @@ def test_success_budget_stops_at_1000_requests(demo, monkeypatch):
 
 
 def test_wrong_returned_class_stops_demo(demo, monkeypatch):
-    def wrong(*args):
+    def wrong(*args, **kwargs):
         result = demo.predict(*args)
         return {**result, "label": "virginica"}
 
@@ -220,8 +220,81 @@ def test_initial_unavailable_telemetry_sends_no_predictions(demo, monkeypatch):
     monkeypatch.setattr(
         demo.module,
         "observe",
-        lambda *_: replace(demo.normal, available=False, alert_state="unavailable"),
+        lambda *_, **kwargs: replace(
+            demo.normal, available=False, alert_state="unavailable"
+        ),
     )
     with pytest.raises(MonitoringError):
         run(demo)
     assert demo.calls == []
+
+
+def test_resource_replacement_with_same_generation_stops_traffic(demo, monkeypatch):
+    def replaced(*args, **kwargs):
+        result = demo.predict(*args, **kwargs)
+        demo.data["metadata"]["uid"] = "replacement-owner"
+        return result
+
+    monkeypatch.setattr(demo.module, "predict_with_service", replaced)
+    with pytest.raises(MonitoringError) as error:
+        run(demo)
+    assert len(demo.calls) == 1
+    assert error.value.evidence["complete"] is False
+
+
+def test_deadline_between_service_get_and_prediction_post(demo, monkeypatch):
+    from backend.app import local_inference
+
+    starts = []
+
+    def read_service(*args, **kwargs):
+        starts.append(("GET", demo.clock.now()))
+        demo.clock.value = 601
+        return {
+            "metadata": {
+                "ownerReferences": [
+                    {
+                        "uid": "owner",
+                        "kind": "ModelDeployment",
+                        "name": "iris",
+                        "apiVersion": "mlops.strawhats.dev/v1alpha1",
+                        "controller": True,
+                    }
+                ]
+            },
+            "spec": {
+                "type": "ClusterIP",
+                "selector": {"mlops.strawhats.dev/owner-uid": "owner"},
+                "ports": [{"port": 8000, "targetPort": "http", "protocol": "TCP"}],
+            },
+        }
+
+    def post(*args, **kwargs):
+        starts.append(("POST", demo.clock.now()))
+        return {
+            "label": "setosa",
+            "confidence": 0.98,
+            "probabilities": {"setosa": 0.98, "versicolor": 0.01, "virginica": 0.01},
+            "latency_ms": 2.0,
+        }
+
+    demo.cluster.sdk = SimpleNamespace(
+        sanitize_for_serialization=lambda value: value, call_api=post
+    )
+    monkeypatch.setattr(
+        "kubernetes.client.CoreV1Api",
+        lambda _: SimpleNamespace(read_namespaced_service=read_service),
+    )
+
+    def initial(*args, **kwargs):
+        demo.clock.value = 599
+        return demo.normal
+
+    monkeypatch.setattr(demo.module, "observe", initial)
+    monkeypatch.setattr(
+        demo.module, "predict_with_service", local_inference.predict_with_service
+    )
+    with pytest.raises(MonitoringError) as error:
+        run(demo)
+    assert starts == [("GET", 599)]
+    assert error.value.evidence["complete"] is False

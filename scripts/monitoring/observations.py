@@ -3,8 +3,10 @@
 import argparse
 import json
 import math
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Literal
 
@@ -48,11 +50,18 @@ class Observation:
     resident_memory_bytes: float | None
     target_pods: tuple[str, ...] = ()
     alert_labels: dict[str, str] = field(default_factory=dict)
+    resource_uid: str = ""
 
 
 def require_snapshot(
-    cluster: LocalCluster, expected_generation: int | None = None
+    cluster: LocalCluster,
+    expected_generation: int | None = None,
+    *,
+    expected_uid: str | None = None,
+    before_request: Callable[[], None] | None = None,
 ) -> dict:
+    if before_request:
+        before_request()
     resource = cluster.resource()
     try:
         target = choose_target(resource)
@@ -61,7 +70,9 @@ def require_snapshot(
         valid = (
             metadata["name"] == NAME
             and metadata["namespace"] == NAMESPACE
-            and metadata.get("uid")
+            and isinstance(metadata.get("uid"), str)
+            and bool(metadata["uid"])
+            and (expected_uid is None or metadata["uid"] == expected_uid)
             and not metadata.get("deletionTimestamp")
             and type(generation) is int
             and status["observedGeneration"] == generation
@@ -70,10 +81,13 @@ def require_snapshot(
             and status["readyReplicas"] == target.replicas
             and target.image == status["image"] == IMAGE
             and (expected_generation is None or generation == expected_generation)
-            and cluster.controller_ready()
         )
     except (KeyError, TypeError, ValueError):
         valid = False
+    if valid:
+        if before_request:
+            before_request()
+        valid = cluster.controller_ready()
     if not valid:
         raise MonitoringError(
             "Local Iris must have a current ready controller, observed revision and monitoring image. Stop if the deployment changes."
@@ -81,12 +95,16 @@ def require_snapshot(
     return resource
 
 
-def _fetch(prometheus: httpx.Client, path: str, **params) -> dict:
+def _fetch(
+    prometheus: httpx.Client, path: str, *, before_request=None, **params
+) -> dict:
     if str(prometheus.base_url).rstrip("/") != PROMETHEUS_URL:
         raise MonitoringError(
             "Prometheus must use the fixed loopback address on port 9090."
         )
     try:
+        if before_request:
+            before_request()
         response = prometheus.get(path, params=params, follow_redirects=False)
         response.raise_for_status()
         payload = response.json()
@@ -99,13 +117,28 @@ def _fetch(prometheus: httpx.Client, path: str, **params) -> dict:
         ) from None
 
 
-def _query(prometheus, expression):
-    result = _fetch(prometheus, "/api/v1/query", query=expression)
+def _rows(data, key, *, labels_key=None):
+    rows = data.get(key)
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise MonitoringError("Local Prometheus returned a malformed collection.")
+    if labels_key and not all(
+        isinstance(row.get(labels_key), dict)
+        and all(isinstance(value, str) for value in row[labels_key].values())
+        for row in rows
+    ):
+        raise MonitoringError("Local Prometheus returned malformed labels.")
+    return rows
+
+
+def _query(prometheus, expression, *, before_request=None):
+    result = _fetch(
+        prometheus, "/api/v1/query", before_request=before_request, query=expression
+    )
     if result.get("resultType") != "vector" or not isinstance(
         result.get("result"), list
     ):
         raise MonitoringError("Local Prometheus returned an invalid vector.")
-    return result["result"]
+    return _rows(result, "result", labels_key="metric")
 
 
 def _number(row):
@@ -136,6 +169,8 @@ def _instances(rows):
 
 def _fresh(target):
     try:
+        if not isinstance(target.get("lastScrape"), str):
+            return False
         stamped = datetime.fromisoformat(target["lastScrape"].replace("Z", "+00:00"))
         age = (datetime.now(timezone.utc) - stamped).total_seconds()
         return -5 <= age <= 45
@@ -143,8 +178,17 @@ def _fresh(target):
         return False
 
 
-def observe(cluster: LocalCluster, prometheus: httpx.Client) -> Observation:
-    resource = require_snapshot(cluster)
+def observe(
+    cluster: LocalCluster,
+    prometheus: httpx.Client,
+    *,
+    before_request: Callable[[], None] | None = None,
+) -> Observation:
+    resource = require_snapshot(cluster, before_request=before_request)
+    fetch = partial(_fetch, prometheus, before_request=before_request)
+    query = partial(_query, prometheus, before_request=before_request)
+    if before_request:
+        before_request()
     pods = cluster.sdk.sanitize_for_serialization(
         client.CoreV1Api(cluster.sdk).list_namespaced_pod(
             NAMESPACE,
@@ -170,7 +214,9 @@ def observe(cluster: LocalCluster, prometheus: httpx.Client) -> Observation:
     )
     targets = [
         item
-        for item in _fetch(prometheus, "/api/v1/targets").get("activeTargets", [])
+        for item in _rows(
+            fetch("/api/v1/targets"), "activeTargets", labels_key="labels"
+        )
         if item.get("labels", {}).get("job") == "iris-model"
     ]
     instances = {item.get("labels", {}).get("instance") for item in targets}
@@ -189,8 +235,8 @@ def observe(cluster: LocalCluster, prometheus: httpx.Client) -> Observation:
     )
     rules = [
         rule
-        for group in _fetch(prometheus, "/api/v1/rules").get("groups", [])
-        for rule in group.get("rules", [])
+        for group in _rows(fetch("/api/v1/rules"), "groups")
+        for rule in _rows(group, "rules")
         if rule.get("name") == ALERT_NAME
     ]
     rule_valid = (
@@ -201,18 +247,18 @@ def observe(cluster: LocalCluster, prometheus: httpx.Client) -> Observation:
     )
     alerts = [
         item
-        for item in _fetch(prometheus, "/api/v1/alerts").get("alerts", [])
+        for item in _rows(fetch("/api/v1/alerts"), "alerts", labels_key="labels")
         if item.get("labels", {}).get("alertname") == ALERT_NAME
     ]
-    counts = _instances(_query(prometheus, CLASS_COUNT))
+    counts = _instances(query(CLASS_COUNT))
     cpu, memory = (
-        _instances(_query(prometheus, CPU)),
-        _instances(_query(prometheus, MEMORY)),
+        _instances(query(CPU)),
+        _instances(query(MEMORY)),
     )
-    flag = _scalar(_query(prometheus, "iris:telemetry_available"))
-    recent = _scalar(_query(prometheus, "iris:predictions:increase2m"))
+    flag = _scalar(query("iris:telemetry_available"))
+    recent = _scalar(query("iris:predictions:increase2m"))
     shares = {}
-    for row in _query(prometheus, "iris:class_share:ratio2m"):
+    for row in query("iris:class_share:ratio2m"):
         label, value = row.get("metric", {}).get("label"), _number(row)
         if label not in LABELS or label in shares or value is None or value > 1:
             shares = {}
@@ -265,6 +311,7 @@ def observe(cluster: LocalCluster, prometheus: httpx.Client) -> Observation:
         sum(memory.values()) if available else None,
         tuple(sorted(names)),
         labels,
+        resource["metadata"]["uid"],
     )
 
 

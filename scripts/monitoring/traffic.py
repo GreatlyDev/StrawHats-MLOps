@@ -51,12 +51,17 @@ def run_demo(
 
     def snapshot(expected=None):
         guard()
-        return require_snapshot(cluster, expected_generation=expected)
+        return require_snapshot(
+            cluster,
+            expected_generation=expected,
+            expected_uid=resource_uid if expected is not None else None,
+            before_request=guard,
+        )
 
     def sample():
         snapshot(generation)
         guard()
-        result = observe(cluster, prometheus)
+        result = observe(cluster, prometheus, before_request=guard)
         # An in-flight operation may finish after the deadline; no next work starts.
         snapshot(generation)
         report["observations"].append(
@@ -77,7 +82,10 @@ def run_demo(
         guard()
         last_request = clock()
         result = predict_with_service(
-            cluster, resource, DeployedPredictionInput(features=VECTORS[label])
+            cluster,
+            resource,
+            DeployedPredictionInput(features=VECTORS[label]),
+            before_request=guard,
         )
         report["successful_requests"] += 1
         snapshot(generation)
@@ -113,7 +121,12 @@ def run_demo(
     try:
         resource = snapshot()
         generation = resource["metadata"]["generation"]
-        report.update(generation=generation, image=resource["status"]["image"])
+        resource_uid = resource["metadata"]["uid"]
+        report.update(
+            generation=generation,
+            resource_uid=resource_uid,
+            image=resource["status"]["image"],
+        )
         sample()  # Refuse to send traffic into an unverified monitoring setup.
         labels = tuple(VECTORS)
         for index in range(60):

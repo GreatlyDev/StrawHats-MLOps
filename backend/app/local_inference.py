@@ -1,5 +1,6 @@
 """Validate inputs and results for inference through the fixed local Iris Service."""
 
+from collections.abc import Callable
 from math import isclose
 from typing import Annotated, Literal
 
@@ -38,9 +39,17 @@ class IrisResult(BaseModel):
         return self
 
 
-def predict_with_service(cluster, resource, data: DeployedPredictionInput) -> dict:
+def predict_with_service(
+    cluster,
+    resource,
+    data: DeployedPredictionInput,
+    *,
+    before_request: Callable[[], None] | None = None,
+) -> dict:
     from kubernetes import client
 
+    if before_request:
+        before_request()
     service = cluster.sdk.sanitize_for_serialization(
         client.CoreV1Api(cluster.sdk).read_namespaced_service(
             NAME, NAMESPACE, _request_timeout=TIMEOUT
@@ -73,6 +82,8 @@ def predict_with_service(cluster, resource, data: DeployedPredictionInput) -> di
         )
     # Generated Service proxy methods omit the body; use the SDK's JSON transport.
     try:
+        if before_request:
+            before_request()
         result = cluster.sdk.call_api(
             "/api/v1/namespaces/{namespace}/services/{name}/proxy/{path}",
             "POST",

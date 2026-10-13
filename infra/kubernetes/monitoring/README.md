@@ -106,8 +106,10 @@ The demo uses only the fixed existing Iris Service: balanced baseline, Setosa-he
 traffic until the warning fires, then balanced traffic until it recovers with
 healthy telemetry and adequate samples. It sends at most 2 requests/s, one in flight,
 1000 successful requests, and starts no new work after its 600s deadline. Existing
-finite transport timeouts apply to an in-flight operation. A deployment revision
-change, missing telemetry or transport error stops it. Evidence is saved under
+finite transport timeouts apply to an in-flight operation; the deadline is checked
+before each new Kubernetes or Prometheus request, including the prediction POST.
+A resource UID or generation change, malformed/missing telemetry or transport
+error stops it. Evidence includes the initial resource UID and is saved under
 ignored `.local/milestone-four/`; no synthetic metrics are sent to the live cluster.
 
 The workload must remain ready, and application predictions must still report
