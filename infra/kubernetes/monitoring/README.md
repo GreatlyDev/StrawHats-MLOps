@@ -66,9 +66,11 @@ already-owned matching configuration.
 The metrics-server base is the official v0.9.0 release `components.yaml`, preserved
 with [its Apache license](metrics-server/LICENSE). Upstream SHA256:
 `1cec29a5267809306a2c6ec74a3e449abbb705b4a8beed0c8a1963910f72c79b`.
-The local overlay bounds resources. If Docker Desktop's kubelet certificate needs
-the testing-only `--kubelet-insecure-tls` exception, it belongs exclusively in this
-local overlay and must be documented after verification; never apply it to AWS.
+The local overlay bounds resources. Docker Desktop's kubelet certificate was
+verified to lack IP SANs on October 13, 2026, preventing resource scrapes. The
+testing-only `--kubelet-insecure-tls` exception is therefore confined to this local
+overlay. Kubernetes API TLS verification and addon authentication remain enabled;
+never apply this overlay or exception to AWS.
 
 Wait for Prometheus/Grafana/metrics-server Deployments and metrics API readiness.
 Verify real resource readings:
