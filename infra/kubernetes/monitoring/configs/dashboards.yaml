@@ -1,0 +1,11 @@
+apiVersion: 1
+providers:
+  - name: local-iris
+    orgId: 1
+    folder: StrawHats
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 15
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

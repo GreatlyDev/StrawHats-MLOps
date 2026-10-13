@@ -1,0 +1,152 @@
+rule_files: [/etc/prometheus/iris-alerts.yaml]
+evaluation_interval: 10s
+tests:
+  - name: sustained concentration waits before firing
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x30'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0+3x30'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0x30'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="virginica"}', values: '0x30'}
+    alert_rule_test:
+      - {eval_time: 1m20s, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+      - eval_time: 2m
+        alertname: IrisPredictionDistributionSkew
+        exp_alerts:
+          - exp_labels: {label: setosa, severity: warning}
+            exp_annotations:
+              summary: Iris predictions concentrated in setosa
+              description: Prediction concentration is a drift indicator; no accuracy loss has been measured.
+  - name: balanced traffic does not warn
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0+1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0+1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="virginica"}', values: '0+1x24'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+    promql_expr_test:
+      - expr: iris:telemetry_available
+        eval_time: 2m
+        exp_samples: [{labels: 'iris:telemetry_available', value: 1}]
+  - name: too few observations do not warn
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0+0.1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="virginica"}', values: '0x24'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+  - name: zero observations are not a skew
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="virginica"}', values: '0x24'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+  - name: two replicas aggregate before computing shares
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x24'}
+      - {series: 'up{job="iris-model",instance="b"}', values: '1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0+2x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="virginica"}', values: '0x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="b",label="setosa"}', values: '0+2x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="b",label="versicolor"}', values: '0x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="b",label="virginica"}', values: '0x24'}
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IrisPredictionDistributionSkew
+        exp_alerts:
+          - exp_labels: {label: setosa, severity: warning}
+            exp_annotations:
+              summary: Iris predictions concentrated in setosa
+              description: Prediction concentration is a drift indicator; no accuracy loss has been measured.
+  - name: missing a class cannot warn from a partial denominator
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0+3x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0x24'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+    promql_expr_test:
+      - expr: iris:telemetry_available
+        eval_time: 2m
+        exp_samples: [{labels: 'iris:telemetry_available', value: 0}]
+  - name: one older replica without class metrics makes telemetry unavailable
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x24'}
+      - {series: 'up{job="iris-model",instance="b"}', values: '1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0+3x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="virginica"}', values: '0x24'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+    promql_expr_test:
+      - expr: iris:telemetry_available
+        eval_time: 2m
+        exp_samples: [{labels: 'iris:telemetry_available', value: 0}]
+  - name: scrape failure is unavailable even when old increases remain high
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x12 0x12'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0+3x12 36x12'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0x25'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="virginica"}', values: '0x25'}
+    alert_rule_test:
+      - {eval_time: 2m20s, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+    promql_expr_test:
+      - expr: iris:telemetry_available
+        eval_time: 2m20s
+        exp_samples: [{labels: 'iris:telemetry_available', value: 0}]
+  - name: no targets are unavailable
+    interval: 10s
+    input_series: []
+    alert_rule_test:
+      - {eval_time: 2m, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+    promql_expr_test:
+      - expr: iris:telemetry_available
+        eval_time: 2m
+        exp_samples: [{labels: 'iris:telemetry_available', value: 0}]
+  - name: balanced traffic after a real warning recovers with sufficient samples
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x40'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0+3x15 46+1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0x15 1+1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="virginica"}', values: '0x15 1+1x24'}
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IrisPredictionDistributionSkew
+        exp_alerts:
+          - exp_labels: {label: setosa, severity: warning}
+            exp_annotations:
+              summary: Iris predictions concentrated in setosa
+              description: Prediction concentration is a drift indicator; no accuracy loss has been measured.
+      - {eval_time: 4m, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+    promql_expr_test:
+      - {expr: 'max(iris:class_share:ratio2m) <= bool 0.90', eval_time: 4m, exp_samples: [{labels: '{}', value: 1}]}
+      - {expr: 'iris:predictions:increase2m >= bool 20', eval_time: 4m, exp_samples: [{labels: '{}', value: 1}]}
+      - {expr: iris:telemetry_available, eval_time: 4m, exp_samples: [{labels: 'iris:telemetry_available', value: 1}]}
+  - name: counter resets across two balanced replicas do not create concentration
+    interval: 10s
+    input_series:
+      - {series: 'up{job="iris-model",instance="a"}', values: '1x24'}
+      - {series: 'up{job="iris-model",instance="b"}', values: '1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="setosa"}', values: '0+1x8 0+1x15'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="versicolor"}', values: '0+1x8 0+1x15'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="a",label="virginica"}', values: '0+1x8 0+1x15'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="b",label="setosa"}', values: '0+1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="b",label="versicolor"}', values: '0+1x24'}
+      - {series: 'strawhats_model_prediction_class_total{job="iris-model",instance="b",label="virginica"}', values: '0+1x24'}
+    alert_rule_test:
+      - {eval_time: 2m, alertname: IrisPredictionDistributionSkew, exp_alerts: []}
+    promql_expr_test:
+      - {expr: 'max(iris:class_share:ratio2m)', eval_time: 2m, exp_samples: [{labels: '{}', value: 0.3333333333333333}]}
