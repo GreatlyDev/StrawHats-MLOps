@@ -26,6 +26,9 @@ Prometheus retains 6h/256MB in ephemeral storage; Grafana configuration is
 provisioned from source. Recreated monitoring Pods lose transient history, then
 recover their datasource/dashboard/rules. Generate fresh traffic to warm charts.
 Model counters reset if its serving process restarts.
+Grafana disables optional plugin preinstallation and uses a 384MiB Go memory
+target within its 512Mi container limit. The built-in Prometheus datasource and
+dashboard panels require no downloaded plugins.
 
 ## Local preparation and ownership
 

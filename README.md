@@ -4,7 +4,7 @@
 
 A model operations dashboard for registering ML models, testing inference, preparing Kubernetes deployment configuration, and asking for deployment guidance through LangChain. This repository is the first local foundation of the group's ML Deployment Orchestrator.
 
-**Status:** the local dashboard connects to a verified Kubernetes operator/CRD for Iris deployment, observed status, scaling, and rollback on Docker Desktop. Cloud deployment, full monitoring/AI automation, the public demo, and demo GIF remain unfinished.
+**Status:** the local dashboard connects to a verified Kubernetes operator/CRD for Iris deployment, observed status, scaling, rollback and real inference on Docker Desktop. Local Prometheus/Grafana monitoring and a prediction-concentration warning are verified. Cloud deployment, AI resource-adjustment workflow, the public demo, and demo GIF remain unfinished.
 
 ## Team
 

@@ -32,6 +32,8 @@ spec:
             - {name: GF_ANALYTICS_REPORTING_ENABLED, value: 'false'}
             - {name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: 'false'}
             - {name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES, value: 'false'}
+            - {name: GF_PLUGINS_PREINSTALL_DISABLED, value: 'true'}
+            - {name: GOMEMLIMIT, value: 384MiB}
             - {name: GF_LOG_MODE, value: console}
             - {name: GF_PATHS_LOGS, value: /tmp/logs}
             - name: GF_SECURITY_ADMIN_USER
