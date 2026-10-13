@@ -115,7 +115,7 @@ Tests exercise persistence, input rejection, real predictions, manifest contents
 ### Local Iris dashboard controls
 
 Install the [local operator](infra/kubernetes/operator/README.md), including the
-verified `strawhats-iris:milestone-one` image. Install
+verified `strawhats-iris:local-monitoring` image. Install
 `backend/requirements-operator.txt` in the backend environment. Set
 `LOCAL_OPERATOR_ENABLED=1` in `.env.local` and restart the backend, then open
 **Deployments → Local Iris**.

@@ -7,6 +7,7 @@ from prometheus_client import (
     CollectorRegistry,
     Counter,
     Histogram,
+    ProcessCollector,
     generate_latest,
 )
 
@@ -18,11 +19,20 @@ def create_model_service() -> FastAPI:
     """Standalone model workload satisfying the generated Kubernetes manifest."""
     pipeline, iris, metrics = fit_example()
     registry = CollectorRegistry()
+    ProcessCollector(registry=registry)
     predictions = Counter(
         "strawhats_model_predictions_total",
         "Successful model predictions",
         registry=registry,
     )
+    classes = Counter(
+        "strawhats_model_prediction_class_total",
+        "Successful model predictions by Iris class",
+        ["label"],
+        registry=registry,
+    )
+    for label in ("setosa", "versicolor", "virginica"):
+        classes.labels(label).inc(0)
     duration = Histogram(
         "strawhats_model_prediction_seconds",
         "Model inference duration",
@@ -46,6 +56,7 @@ def create_model_service() -> FastAPI:
         index = int(probabilities.argmax())
         elapsed = perf_counter() - started
         predictions.inc()
+        classes.labels(str(iris.target_names[index])).inc()
         duration.observe(elapsed)
         return {
             "label": str(iris.target_names[index]),

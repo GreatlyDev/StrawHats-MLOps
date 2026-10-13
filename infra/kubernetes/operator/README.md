@@ -17,7 +17,7 @@ permissions remain limited to its namespace.
 kubectl --context docker-desktop get nodes
 kubectl --context docker-desktop get namespace strawhats-operator-local --ignore-not-found
 kubectl --context docker-desktop get crd modeldeployments.mlops.strawhats.dev --ignore-not-found
-docker build --platform linux/amd64 -f backend/Dockerfile.model -t strawhats-iris:milestone-one .
+docker build --platform linux/amd64 -f backend/Dockerfile.model -t strawhats-iris:local-monitoring .
 docker build --platform linux/amd64 -f backend/Dockerfile.operator -t strawhats-model-operator:local .
 ```
 
@@ -30,7 +30,7 @@ For another local provisioner/node, use its corresponding local image loader.
 
 ```powershell
 New-Item -ItemType Directory -Force .local/operator | Out-Null
-docker save --platform linux/amd64 --output .local/operator/images.tar strawhats-model-operator:local strawhats-iris:milestone-one
+docker save --platform linux/amd64 --output .local/operator/images.tar strawhats-model-operator:local strawhats-iris:local-monitoring
 @'
 import subprocess
 with open('.local/operator/images.tar', 'rb') as stream:

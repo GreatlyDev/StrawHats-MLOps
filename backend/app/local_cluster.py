@@ -8,7 +8,7 @@ from fastapi import HTTPException
 CONTEXT = "docker-desktop"
 NAMESPACE = "strawhats-operator-local"
 NAME = "iris"
-IMAGE = "strawhats-iris:milestone-one"
+IMAGE = "strawhats-iris:local-monitoring"
 GROUP, VERSION, PLURAL = "mlops.strawhats.dev", "v1alpha1", "modeldeployments"
 TIMEOUT = (3, 5)
 
