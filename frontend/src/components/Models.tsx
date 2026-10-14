@@ -3,16 +3,20 @@ import type { FormEvent } from 'react';
 import { Box, Plus, FlaskConical, X, Play } from 'lucide-react';
 import { request } from '../api';
 import type { Model, Prediction } from '../types';
+import type { Runtime } from '../runtime';
 import { Badge, Empty, ErrorNotice, percent } from './shared';
 export default function Models({
   models,
   refresh,
   isActive,
+  mode,
 }: {
   models: Model[];
   refresh: () => Promise<void>;
   isActive: boolean;
+  mode: Runtime['mode'];
 }) {
+  const portfolio = mode === 'portfolio';
   const [modal, setModal] = useState(false);
   useEffect(() => {
     if (!isActive) setModal(false);
@@ -38,31 +42,53 @@ export default function Models({
     <>
       <div className="section-toolbar">
         <div>
-          <h2>Registered models</h2>
-          <p>Versioned models, measured results, and a place to start.</p>
+          <h2>{portfolio ? 'Prepared Iris model' : 'Registered models'}</h2>
+          <p>
+            {portfolio
+              ? 'Exported classifier with measured held-out evaluation.'
+              : 'Versioned models, measured results, and a place to start.'}
+          </p>
         </div>
         <div className="actions">
           <button
             className="secondary"
-            disabled={busy || models.some((m) => m.id === 'iris-classifier')}
+            disabled={
+              portfolio ||
+              busy ||
+              models.some((m) => m.id === 'iris-classifier')
+            }
+            aria-describedby={portfolio ? 'model-backend-note' : undefined}
             onClick={train}
           >
             <FlaskConical size={16} />
             {busy ? 'Training…' : 'Train Iris example'}
           </button>
-          <button className="primary" onClick={() => setModal(true)}>
+          <button
+            className="primary"
+            disabled={portfolio}
+            aria-describedby={portfolio ? 'model-backend-note' : undefined}
+            onClick={() => setModal(true)}
+          >
             <Plus size={17} />
             Register model
           </button>
         </div>
       </div>
+      {portfolio && (
+        <p id="model-backend-note" className="soft-note">
+          Training and model registration require the connected backend. This
+          session loads an existing Iris export; it does not train a new model.
+        </p>
+      )}
       {error && <ErrorNotice message={error} />}
       <section className="card">
         {models.length ? (
           <div className="table-scroll">
             <table>
               <caption className="sr-only">
-                Registered models and evaluation results
+                {portfolio
+                  ? 'Prepared Iris and evaluation results'
+                  : 'Registered models and evaluation results'}
               </caption>
               <thead>
                 <tr>
@@ -100,9 +126,11 @@ export default function Models({
                     </td>
                     <td>
                       <Badge tone={model.kind === 'local' ? 'green' : ''}>
-                        {model.kind === 'local'
-                          ? 'Local inference'
-                          : 'Container'}
+                        {portfolio
+                          ? 'Browser inference'
+                          : model.kind === 'local'
+                            ? 'Local inference'
+                            : 'Container'}
                       </Badge>
                     </td>
                   </tr>
@@ -121,10 +149,13 @@ export default function Models({
         <section className="card">
           <div className="card-heading">
             <div>
-              <h3>Workspace prediction</h3>
+              <h3>
+                {portfolio ? 'Browser prediction' : 'Workspace prediction'}
+              </h3>
               <p>
-                Run the classifier stored in this backend workspace. Use
-                Deployments → Local Iris for Kubernetes inference.
+                {portfolio
+                  ? 'Compute flower-class probabilities with the exported Iris classifier. Enter four measurements in centimeters, greater than 0 and at most 30.'
+                  : 'Run the classifier stored in this backend workspace. Use Deployments → Local Iris for Kubernetes inference.'}
               </p>
             </div>
             <Play size={18} />
@@ -132,7 +163,7 @@ export default function Models({
           {active ? (
             <>
               <label className="field">
-                Local model
+                {portfolio ? 'Prepared model' : 'Local model'}
                 <select
                   value={active.id}
                   onChange={(e) => setSelected(e.target.value)}
@@ -148,6 +179,7 @@ export default function Models({
                 key={active.id}
                 model={active}
                 refresh={refresh}
+                portfolio={portfolio}
               />
             </>
           ) : (
@@ -164,9 +196,9 @@ export default function Models({
             <br />A complete workflow.
           </h3>
           <p>
-            The Iris example trains a logistic regression classifier and
-            measures its performance on held-out data. Each prediction records
-            probabilities and latency.
+            {portfolio
+              ? 'This export comes from StandardScaler and logistic regression trained on 120 Iris samples and evaluated on 30 held-out samples. Browser predictions use those parameters and measure computation time on your device.'
+              : 'The Iris example trains a logistic regression classifier and measures its performance on held-out data. Each prediction records probabilities and latency.'}
           </p>
           {active ? (
             <>
@@ -201,7 +233,7 @@ export default function Models({
           )}
         </section>
       </div>
-      {isActive && modal && (
+      {!portfolio && isActive && modal && (
         <RegisterModal close={() => setModal(false)} refresh={refresh} />
       )}
     </>
@@ -210,9 +242,11 @@ export default function Models({
 function PredictionForm({
   model,
   refresh,
+  portfolio,
 }: {
   model: Model;
   refresh: () => Promise<void>;
+  portfolio: boolean;
 }) {
   const [values, setValues] = useState(['5.1', '3.5', '1.4', '0.2']);
   const [result, setResult] = useState<Prediction | null>(null);
@@ -248,6 +282,7 @@ function PredictionForm({
               type="number"
               step="any"
               min="0"
+              max={portfolio ? '30' : undefined}
               value={values[i] || ''}
               onChange={(e) =>
                 setValues((v) =>
@@ -270,6 +305,7 @@ function PredictionForm({
               <div>
                 <small>PREDICTED CLASS</small>
                 <h3>{result.label}</h3>
+                {portfolio && <small>Computed in your browser</small>}
               </div>
               <Badge tone="green">{result.latency_ms.toFixed(2)} ms</Badge>
             </div>

@@ -32,9 +32,11 @@ jobs:
       - name: Check dependency compatibility
         run: python -m pip check
       - name: Lint backend
-        run: python -m ruff check backend scripts/cloud scripts/monitoring
+        run: python -m ruff check backend scripts/cloud scripts/monitoring scripts/portfolio
       - name: Check backend formatting
-        run: python -m ruff format --check backend scripts/cloud scripts/monitoring
+        run: python -m ruff format --check backend scripts/cloud scripts/monitoring scripts/portfolio
+      - name: Verify browser model and preview exports
+        run: python -m scripts.portfolio.export_iris --check
       - name: Test backend
         run: python -m pytest backend/tests -q --disable-plugin-autoload
 
@@ -80,5 +82,13 @@ jobs:
         run: npm run format:check
       - name: Test frontend
         run: npm test
-      - name: Build frontend
+      - name: Build connected workspace
         run: npm run build
+        env:
+          VITE_APP_MODE: workspace
+          VITE_API_BASE_URL: ""
+      - name: Build standalone portfolio
+        run: npm run build
+        env:
+          VITE_APP_MODE: portfolio
+          VITE_API_BASE_URL: ""
