@@ -14,6 +14,7 @@ from backend.app import models
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACT = ROOT / "frontend/src/portfolio/iris-model.json"
 ORACLE = ROOT / "frontend/tests/fixtures/iris-oracle.json"
+PREVIEWS = ROOT / "frontend/tests/fixtures/preview-oracle.json"
 
 
 def build_artifact() -> dict:
@@ -79,11 +80,41 @@ def build_oracle() -> dict:
     }
 
 
+def build_preview_oracle() -> dict:
+    import yaml
+
+    from backend.app.deployments import preview
+    from backend.app.schemas import DeploymentInput
+
+    cases = []
+    for replicas, cpu, memory in ((1, 50, 128), (2, 250, 256), (10, 8000, 16384)):
+        config = DeploymentInput(
+            model_id="iris-classifier",
+            name="iris-preview",
+            namespace="strawhats",
+            image="registry.example.com/iris:example",
+            replicas=replicas,
+            cpu_millicores=cpu,
+            memory_mebibytes=memory,
+        )
+        cases.append(
+            {
+                "input": config.model_dump(),
+                "resources": list(yaml.safe_load_all(preview(config)["manifest"])),
+            }
+        )
+    return {"cases": cases}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
-    for path, value in ((ARTIFACT, build_artifact()), (ORACLE, build_oracle())):
+    for path, value in (
+        (ARTIFACT, build_artifact()),
+        (ORACLE, build_oracle()),
+        (PREVIEWS, build_preview_oracle()),
+    ):
         text = json.dumps(value, indent=2, ensure_ascii=True, allow_nan=False) + "\n"
         if args.check:
             if not path.is_file() or path.read_text(encoding="utf-8") != text:

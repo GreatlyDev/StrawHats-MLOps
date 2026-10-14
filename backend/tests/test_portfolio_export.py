@@ -98,6 +98,7 @@ def test_check_rejects_stale_export(tmp_path, monkeypatch, capsys):
     exporter = load_exporter()
     monkeypatch.setattr(exporter, "ARTIFACT", tmp_path / "model.json")
     monkeypatch.setattr(exporter, "ORACLE", tmp_path / "oracle.json")
+    monkeypatch.setattr(exporter, "PREVIEWS", tmp_path / "previews.json")
     assert exporter.main([]) == 0
     assert exporter.main(["--check"]) == 0
     artifact = json.loads(exporter.ARTIFACT.read_text(encoding="utf-8"))
