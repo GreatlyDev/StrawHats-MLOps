@@ -100,3 +100,29 @@ test('does not change the model or caller measurements during inference', async 
   assert.equal(JSON.stringify(asset), original);
   assert.deepEqual(measurements, [6.3, 3.3, 6, 2.5]);
 });
+
+test('rejects sparse arrays with missing model values or measurements', async () => {
+  const { validateIrisArtifact, predictBrowserIris } = await evaluator();
+  const model = validateIrisArtifact(asset);
+  for (const field of [
+    'labels',
+    'feature_names',
+    'classes',
+    'scaler_mean',
+    'scaler_scale',
+    'intercepts',
+    'coefficients',
+  ]) {
+    const corrupt = structuredClone(asset);
+    corrupt[field] = new Array(corrupt[field].length);
+    assert.throws(
+      () => validateIrisArtifact(corrupt),
+      /model|artifact/i,
+      field,
+    );
+  }
+  const corrupt = structuredClone(asset);
+  corrupt.coefficients[1] = new Array(4);
+  assert.throws(() => validateIrisArtifact(corrupt), /model|artifact/i);
+  assert.throws(() => predictBrowserIris(model, new Array(4)), /measurements/i);
+});

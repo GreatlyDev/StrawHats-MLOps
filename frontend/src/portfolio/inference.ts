@@ -31,7 +31,7 @@ function vector(value: unknown, length: number): value is number[] {
   return (
     Array.isArray(value) &&
     value.length === length &&
-    value.every((n) => typeof n === 'number' && Number.isFinite(n))
+    Array.from(value).every((n) => typeof n === 'number' && Number.isFinite(n))
   );
 }
 
@@ -54,10 +54,10 @@ export function validateIrisArtifact(value: unknown): IrisModelArtifact {
     !a.version ||
     !Array.isArray(a.labels) ||
     a.labels.length !== 3 ||
-    a.labels.some((label, i) => label !== labels[i]) ||
+    Array.from(a.labels).some((label, i) => label !== labels[i]) ||
     !Array.isArray(a.feature_names) ||
     a.feature_names.length !== 4 ||
-    a.feature_names.some((name, i) => name !== features[i]) ||
+    Array.from(a.feature_names).some((name, i) => name !== features[i]) ||
     !vector(a.classes, 3) ||
     a.classes.some((n, i) => n !== i) ||
     !vector(a.scaler_mean, 4) ||
@@ -66,7 +66,7 @@ export function validateIrisArtifact(value: unknown): IrisModelArtifact {
     !vector(a.intercepts, 3) ||
     !Array.isArray(a.coefficients) ||
     a.coefficients.length !== 3 ||
-    a.coefficients.some((row) => !vector(row, 4)) ||
+    Array.from(a.coefficients).some((row) => !vector(row, 4)) ||
     !a.metrics ||
     ['accuracy', 'f1_macro', 'train_accuracy'].some(
       (key) =>
