@@ -69,10 +69,23 @@ def require_snapshot(
     *,
     expected_uid: str | None = None,
     before_request: Callable[[], None] | None = None,
+    request_timeout=None,
 ) -> dict:
     if before_request:
         before_request()
-    resource = cluster.resource()
+
+    def options():
+        return (
+            {}
+            if request_timeout is None
+            else {
+                "request_timeout": request_timeout()
+                if callable(request_timeout)
+                else request_timeout
+            }
+        )
+
+    resource = cluster.resource(**options())
     try:
         target = choose_target(resource)
         metadata, status = resource["metadata"], resource["status"]
@@ -97,7 +110,7 @@ def require_snapshot(
     if valid:
         if before_request:
             before_request()
-        valid = cluster.controller_ready()
+        valid = cluster.controller_ready(**options())
     if not valid:
         raise MonitoringError(
             "Local Iris must have a current ready controller, observed revision and monitoring image. Stop if the deployment changes."

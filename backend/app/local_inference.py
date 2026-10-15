@@ -45,6 +45,7 @@ def predict_with_service(
     data: DeployedPredictionInput,
     *,
     before_request: Callable[[], None] | None = None,
+    request_timeout=TIMEOUT,
 ) -> dict:
     from kubernetes import client
 
@@ -52,7 +53,11 @@ def predict_with_service(
         before_request()
     service = cluster.sdk.sanitize_for_serialization(
         client.CoreV1Api(cluster.sdk).read_namespaced_service(
-            NAME, NAMESPACE, _request_timeout=TIMEOUT
+            NAME,
+            NAMESPACE,
+            _request_timeout=request_timeout()
+            if callable(request_timeout)
+            else request_timeout,
         )
     )
     uid = resource["metadata"]["uid"]
@@ -100,7 +105,9 @@ def predict_with_service(
             response_type="object",
             auth_settings=["BearerToken"],
             _return_http_data_only=True,
-            _request_timeout=TIMEOUT,
+            _request_timeout=request_timeout()
+            if callable(request_timeout)
+            else request_timeout,
         )
         return IrisResult.model_validate(result).model_dump()
     except (ValidationError, UnicodeDecodeError):

@@ -32,9 +32,9 @@ jobs:
       - name: Check dependency compatibility
         run: python -m pip check
       - name: Lint backend
-        run: python -m ruff check backend scripts/cloud scripts/monitoring scripts/portfolio
+        run: python -m ruff check backend scripts/cloud scripts/monitoring scripts/portfolio scripts/optimization
       - name: Check backend formatting
-        run: python -m ruff format --check backend scripts/cloud scripts/monitoring scripts/portfolio
+        run: python -m ruff format --check backend scripts/cloud scripts/monitoring scripts/portfolio scripts/optimization
       - name: Verify browser model and preview exports
         run: python -m scripts.portfolio.export_iris --check
       - name: Test backend
