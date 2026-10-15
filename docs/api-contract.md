@@ -10,6 +10,12 @@ The metric values above describe the shape, not fixed results. Backend returns m
 - POST /models -> Model (201); body {"name":"...","version":"1.0.0","framework":"PyTorch","description":"...","image":"ghcr.io/owner/model:v1"}. External models have kind="container", metrics={}, feature_names=[], labels=[]. Registration text is trimmed before the existing length checks; required name/version/framework values cannot become blank after trimming, and internal formatting is preserved while description whitespace-only values become empty strings.
 - POST /models/{id}/predict; body {"features":[5.1,3.5,1.4,0.2]} -> {"label":"setosa","confidence":0.99,"probabilities":{"setosa":0.99,"versicolor":0.01,"virginica":0.0},"latency_ms":1.23}
 
+Per-model workspace prediction summary:
+- GET /models/{id}/prediction-summary -> {"model_id":"iris-classifier","predictions":2,"label_counts":{"setosa":1,"virginica":1},"median_latency_ms":1.23,"recent_inferences":[{"model_id":"iris-classifier","label":"setosa","latency_ms":1.23,"created_at":"ISO timestamp"}]}. Values illustrate shape, not fixed measurements or a complete two-row history.
+- Counts and alphabetically ordered label distribution cover all persisted successful workspace predictions for that model. Their label-count sum equals predictions. The history and median cover only its latest 30 rows, returned oldest to newest by insertion ID, including when timestamps tie. Failed predictions are excluded.
+- Registered models without observations, including container registrations, return 200 with predictions=0, label_counts={}, median_latency_ms=null and recent_inferences=[]. Missing models return the existing 404 / Model not found in this workspace. error.
+- Reads use one SQLite snapshot and do not create events or change records. Data survives reopening the workspace. This summarizes local workspace observations, not deployed Kubernetes telemetry or the held-out evaluation scores in Model.metrics.
+
 DeploymentPlan:
 {"id":"plan-...","model_id":"iris-classifier","name":"iris-service","namespace":"strawhats","image":"ghcr.io/owner/model:v1","replicas":2,"cpu_millicores":250,"memory_mebibytes":256,"created_at":"ISO timestamp","status":"preview","manifest":"YAML string"}
 - POST /deployment-plans; body {"model_id":"...","name":"iris-service","namespace":"strawhats","image":"...","replicas":2,"cpu_millicores":250,"memory_mebibytes":256} -> DeploymentPlan (201)

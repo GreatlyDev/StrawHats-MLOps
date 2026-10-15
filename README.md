@@ -11,8 +11,8 @@ A model operations dashboard for registering ML models, testing inference, prepa
 | Member | Responsibility |
 | --- | --- |
 | Great-Anthony Umukoro ([GreatlyDev](https://github.com/GreatlyDev)) | UI, integration, deployment and release decisions |
-| Mikayla Brown | Backend development |
-| Mahki Titus | Backend development |
+| Mikayla Brown ([KaylaBro0](https://github.com/KaylaBro0)) | Registry validation and persisted per-model prediction summaries |
+| Mahki Titus ([Mahki7](https://github.com/Mahki7)) | Assistant responses, input validation and bounded workspace context |
 
 Each teammate reviews, tests, and commits their contributions through feature branches and pull requests.
 
@@ -20,6 +20,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 
 - One Piece-inspired responsive React dashboard with parchment panels, nautical branding, and Overview, Models, Deployments, Assistant, and Activity.
 - Persistent SQLite model/container registry and timeline.
+- Read-only per-model prediction summaries with persisted counts, label distribution and latest-30 latency/history.
 - Reproducible Iris classifier with held-out evaluation and real local predictions.
 - Kubernetes Namespace, Deployment, and Service YAML previews with selected resources, replicas, probes, and nonroot settings; copy/download support.
 - Read-only cluster reachability check that reports the actual local context.
