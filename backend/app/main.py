@@ -141,6 +141,11 @@ def create_app(data_dir: Path | None = None, test_mode: bool = False) -> FastAPI
         latency.labels(model_id=model_id).observe(result["latency_ms"] / 1000)
         return result
 
+    @app.get("/api/models/{model_id}/prediction-summary")
+    def prediction_summary(model_id: str):
+        find_model(model_id)
+        return store.prediction_summary(model_id)
+
     @app.post("/api/deployment-plans", status_code=201)
     def create_plan(config: DeploymentInput):
         find_model(config.model_id)

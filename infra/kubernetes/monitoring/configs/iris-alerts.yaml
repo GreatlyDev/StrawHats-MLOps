@@ -1,0 +1,28 @@
+groups:
+  - name: local-iris
+    interval: 10s
+    rules:
+      - record: iris:target_count
+        expr: count(up{job="iris-model"}) or vector(0)
+      - record: iris:telemetry_available
+        expr: |
+          (iris:target_count > bool 0)
+          * ((min(up{job="iris-model"}) == bool 1) or vector(0))
+          * ((count(strawhats_model_prediction_class_total{job="iris-model",label=~"setosa|versicolor|virginica"}) or vector(0)) == bool (3 * iris:target_count))
+      - record: iris:class_predictions:increase2m
+        expr: sum by (label) (increase(strawhats_model_prediction_class_total{job="iris-model"}[2m]))
+      - record: iris:predictions:increase2m
+        expr: sum(iris:class_predictions:increase2m)
+      - record: iris:class_share:ratio2m
+        expr: iris:class_predictions:increase2m / scalar(iris:predictions:increase2m)
+      - alert: IrisPredictionDistributionSkew
+        expr: |
+          (iris:class_share:ratio2m > 0.90)
+          and on() (iris:predictions:increase2m >= 20)
+          and on() (iris:telemetry_available == 1)
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Iris predictions concentrated in {{ $labels.label }}'
+          description: Prediction concentration is a drift indicator; no accuracy loss has been measured.

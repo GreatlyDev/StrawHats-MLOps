@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: strawhats-monitoring-local
+  labels:
+    app.kubernetes.io/part-of: strawhats-mlops
+    app.kubernetes.io/managed-by: strawhats-local-monitoring
+    pod-security.kubernetes.io/enforce: restricted

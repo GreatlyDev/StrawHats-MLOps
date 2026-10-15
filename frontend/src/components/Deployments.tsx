@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { FileCode, Download, Copy, Check, Layers } from 'lucide-react';
 import { request } from '../api';
 import type { Model, DeploymentPlan, Cluster } from '../types';
+import type { Runtime } from '../runtime';
 import { Badge, Empty, ErrorNotice, date } from './shared';
 import LocalIris from './LocalIris';
 export default function Deployments({
@@ -11,13 +12,16 @@ export default function Deployments({
   cluster,
   refresh,
   isActive,
+  mode,
 }: {
   models: Model[];
   plans: DeploymentPlan[];
   cluster: Cluster;
   refresh: () => Promise<void>;
   isActive: boolean;
+  mode: Runtime['mode'];
 }) {
+  const portfolio = mode === 'portfolio';
   const [selected, setSelected] = useState('');
   const [modelId, setModelId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -70,7 +74,39 @@ export default function Deployments({
   }
   return (
     <>
-      <LocalIris isActive={isActive} refresh={refresh} />
+      {portfolio ? (
+        <section className="card">
+          <div className="card-heading">
+            <div>
+              <h3>Live Iris operations</h3>
+              <p id="cluster-required">
+                Deployment, scaling, rollback and deployed predictions require
+                the connected backend and Kubernetes cluster.
+              </p>
+            </div>
+            <Badge tone="gold">Unavailable in browser mode</Badge>
+          </div>
+          <div className="actions">
+            {[
+              'Deploy Iris',
+              'Scale Iris',
+              'Rollback Iris',
+              'Predict with deployed Iris',
+            ].map((label) => (
+              <button
+                key={label}
+                className="secondary"
+                disabled
+                aria-describedby="cluster-required"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <LocalIris isActive={isActive} refresh={refresh} />
+      )}
       <div className="section-toolbar">
         <div>
           <h2>Prepare your next deployment</h2>
@@ -78,7 +114,7 @@ export default function Deployments({
         </div>
         <Badge tone="gold">
           <Layers size={13} />
-          Preview workspace
+          {portfolio ? 'Session previews' : 'Preview workspace'}
         </Badge>
       </div>
       <div className="preview-notice">
@@ -86,8 +122,9 @@ export default function Deployments({
         <div>
           <strong>Preview only · no cluster changes</strong>
           <p>
-            Generating a manifest saves a deployment plan. It does not deploy
-            workloads, scale services, or apply changes to Kubernetes.
+            {portfolio
+              ? 'Save up to 50 previews in this page session and export their YAML. Reload clears saved previews. Image references are drafts; this does not publish an image or apply workloads.'
+              : 'Generating a manifest saves a deployment plan. It does not deploy workloads, scale services, or apply changes to Kubernetes.'}
           </p>
         </div>
       </div>
@@ -106,7 +143,7 @@ export default function Deployments({
                   <span>01</span> Model & image
                 </legend>
                 <label className="field">
-                  Registered model
+                  {portfolio ? 'Prepared model' : 'Registered model'}
                   <select
                     value={model.id}
                     onChange={(e) => setModelId(e.target.value)}
@@ -128,8 +165,9 @@ export default function Deployments({
                     placeholder="ghcr.io/your-team/model:v1"
                   />
                   <small>
-                    A runnable HTTP serving image is required, including for the
-                    local example.
+                    {portfolio
+                      ? 'Enter a draft serving-image reference for the preview. It must be published and runnable before a real deployment.'
+                      : 'A runnable HTTP serving image is required, including for the local example.'}
                   </small>
                 </label>
               </fieldset>

@@ -5,7 +5,7 @@ metadata:
   namespace: strawhats-operator-local
 spec:
   mode: Deploy
-  image: strawhats-iris:milestone-one
+  image: strawhats-iris:local-monitoring
   imagePullPolicy: Never
   replicas: 1
   cpuMillicores: 250

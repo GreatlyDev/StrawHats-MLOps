@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: strawhats-monitoring-local
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: strawhats-grafana
+  template:
+    metadata:
+      labels:
+        app: strawhats-grafana
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: grafana
+          image: grafana/grafana:13.2.4
+          env:
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: 'true'}
+            - {name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Viewer}
+            - {name: GF_ANALYTICS_REPORTING_ENABLED, value: 'false'}
+            - {name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: 'false'}
+            - {name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES, value: 'false'}
+            - {name: GF_PLUGINS_PREINSTALL_DISABLED, value: 'true'}
+            - {name: GOMEMLIMIT, value: 384MiB}
+            - {name: GF_LOG_MODE, value: console}
+            - {name: GF_PATHS_LOGS, value: /tmp/logs}
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef: {name: strawhats-grafana-admin, key: admin-user}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: strawhats-grafana-admin, key: admin-password}
+          ports:
+            - {name: http, containerPort: 3000}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          startupProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 2
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/grafana}
+            - {name: tmp, mountPath: /tmp}
+            - {name: datasource, mountPath: /etc/grafana/provisioning/datasources, readOnly: true}
+            - {name: provider, mountPath: /etc/grafana/provisioning/dashboards, readOnly: true}
+            - {name: dashboard, mountPath: /etc/grafana/dashboards, readOnly: true}
+      volumes:
+        - {name: data, emptyDir: {sizeLimit: 256Mi}}
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+        - name: datasource
+          configMap: {name: grafana-datasource}
+        - name: provider
+          configMap: {name: grafana-provider}
+        - name: dashboard
+          configMap: {name: grafana-dashboard}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: strawhats-monitoring-local
+spec:
+  type: ClusterIP
+  selector:
+    app: strawhats-grafana
+  ports:
+    - {name: http, port: 3000, targetPort: http, protocol: TCP}

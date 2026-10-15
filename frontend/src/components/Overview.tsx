@@ -11,14 +11,18 @@ import {
   Radio,
 } from 'lucide-react';
 import type { Workspace } from '../types';
+import type { Runtime } from '../runtime';
 import { Badge, Empty, date } from './shared';
 export default function Overview({
   data,
   navigate,
+  mode,
 }: {
   data: Workspace;
+  mode: Runtime['mode'];
   navigate: (view: 'models' | 'deployments' | 'assistant' | 'activity') => void;
 }) {
+  const portfolio = mode === 'portfolio';
   const points = data.overview.recent_inferences;
   const max = Math.max(...points.map((p) => p.latency_ms), 1);
   const coords = points
@@ -38,22 +42,28 @@ export default function Overview({
       <div className="stats">
         {[
           {
-            label: 'Registered models',
+            label: portfolio ? 'Prepared models' : 'Registered models',
             value: data.overview.models,
             icon: Box,
-            note: 'Your model registry',
+            note: portfolio
+              ? 'Exported Iris classifier'
+              : 'Your model registry',
           },
           {
             label: 'Deployment previews',
             value: data.overview.deployment_plans,
             icon: Layers,
-            note: 'Saved Kubernetes manifests',
+            note: portfolio
+              ? 'Saved in this page session'
+              : 'Saved Kubernetes manifests',
           },
           {
-            label: 'Total predictions',
+            label: portfolio ? 'Session predictions' : 'Total predictions',
             value: data.overview.predictions,
             icon: Zap,
-            note: 'Measured local inference',
+            note: portfolio
+              ? 'Computed in your browser'
+              : 'Measured local inference',
           },
           {
             label: 'Median latency',
@@ -127,8 +137,12 @@ export default function Overview({
             },
             {
               view: 'assistant' as const,
-              title: 'Ask the crew assistant',
-              note: 'Guidance for your workspace',
+              title: portfolio
+                ? 'About the crew assistant'
+                : 'Ask the crew assistant',
+              note: portfolio
+                ? 'Connected backend required'
+                : 'Guidance for your workspace',
               icon: Radio,
             },
           ].map((action) => (
@@ -155,7 +169,11 @@ export default function Overview({
             <div>
               <span className="eyebrow">OBSERVABILITY</span>
               <h3>Inference performance</h3>
-              <p>Latency from your recent predictions</p>
+              <p>
+                {portfolio
+                  ? 'Browser computation time · latest 30 session predictions'
+                  : 'Latency from your recent predictions'}
+              </p>
             </div>
             <Badge>Measured · ms</Badge>
           </div>
@@ -268,8 +286,9 @@ export default function Overview({
             </>
           ) : (
             <Empty title="Your next prediction starts the story">
-              Train the Iris example and run inference to see measured latency
-              here.
+              {portfolio
+                ? 'Run a browser prediction to see measured computation time here.'
+                : 'Train the Iris example and run inference to see measured latency here.'}
             </Empty>
           )}
         </section>
@@ -277,17 +296,27 @@ export default function Overview({
           <div className="card-heading">
             <div>
               <span className="eyebrow">SERVICE CHECK</span>
-              <h3>Workspace readiness</h3>
-              <p>Actual service status</p>
+              <h3>
+                {portfolio ? 'Session capabilities' : 'Workspace readiness'}
+              </h3>
+              <p>
+                {portfolio
+                  ? 'Browser features and connected requirements'
+                  : 'Actual service status'}
+              </p>
             </div>
           </div>
           <div className="readiness-row">
             <span className="status-dot green" />
             <div>
-              <strong>Backend API</strong>
-              <small>Connected · v{data.health.version}</small>
+              <strong>{portfolio ? 'Browser predictor' : 'Backend API'}</strong>
+              <small>
+                {portfolio
+                  ? 'Prepared Iris export loaded'
+                  : `Connected · v${data.health.version}`}
+              </small>
             </div>
-            <Badge tone="green">Healthy</Badge>
+            <Badge tone="green">{portfolio ? 'Available' : 'Healthy'}</Badge>
           </div>
           <div className="readiness-row">
             <span
@@ -296,9 +325,11 @@ export default function Overview({
             <div>
               <strong>AI assistant</strong>
               <small>
-                {data.health.ai_configured
-                  ? data.health.ai_model
-                  : 'Configure a server-side provider key'}
+                {portfolio
+                  ? 'Connected backend and provider required'
+                  : data.health.ai_configured
+                    ? data.health.ai_model
+                    : 'Configure a server-side provider key'}
               </small>
             </div>
             <Badge tone={data.health.ai_configured ? 'green' : 'gold'}>
@@ -311,7 +342,11 @@ export default function Overview({
             />
             <div>
               <strong>Kubernetes</strong>
-              <small>{data.cluster.context || 'No context configured'}</small>
+              <small>
+                {portfolio
+                  ? 'Connected backend and cluster required'
+                  : data.cluster.context || 'No context configured'}
+              </small>
             </div>
             <Badge tone={data.cluster.connected ? 'green' : 'gold'}>
               {data.cluster.connected ? 'Connected' : 'Offline'}
@@ -352,8 +387,9 @@ export default function Overview({
           ))
         ) : (
           <Empty title="A fresh workspace">
-            Model registrations, predictions, and saved previews will appear
-            here.
+            {portfolio
+              ? 'Browser predictions and saved previews from this session will appear here.'
+              : 'Model registrations, predictions, and saved previews will appear here.'}
           </Empty>
         )}
       </section>

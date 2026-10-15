@@ -11,7 +11,7 @@ import {
   ArrowRight,
   Anchor,
 } from 'lucide-react';
-import { loadWorkspace } from './api';
+import { loadWorkspace, runtime } from './api';
 import type { Workspace } from './types';
 import Overview from './components/Overview';
 import Models from './components/Models';
@@ -20,6 +20,7 @@ import Assistant from './components/Assistant';
 import { Badge, Empty, ErrorNotice, date } from './components/shared';
 import { StrawHatMark } from './components/CrewArt';
 type View = 'overview' | 'models' | 'deployments' | 'assistant' | 'activity';
+const portfolio = runtime.mode === 'portfolio';
 const navigation = [
   { id: 'overview', label: 'Overview', short: 'Overview', icon: Compass },
   { id: 'models', label: 'Models', short: 'Models', icon: Box },
@@ -113,7 +114,9 @@ export default function App() {
             <small>MLOPS COMMAND DECK</small>
           </div>
         </a>
-        <span className="nav-label">YOUR WORKSPACE</span>
+        <span className="nav-label">
+          {portfolio ? 'YOUR BROWSER SESSION' : 'YOUR WORKSPACE'}
+        </span>
         <nav aria-label="Main navigation">
           {navigation.map((item) => (
             <a
@@ -152,8 +155,9 @@ export default function App() {
             <small>A COURSE OF YOUR OWN</small>
             <strong>Build. Test. Set sail.</strong>
             <p>
-              Your models, your decisions. Review your plans and manage Iris
-              locally.
+              {portfolio
+                ? 'Explore Iris predictions and Kubernetes previews in your browser.'
+                : 'Your models, your decisions. Review your plans and manage Iris locally.'}
             </p>
           </div>
           <div className="workspace-identity">
@@ -180,11 +184,15 @@ export default function App() {
                 <span
                   className={`status-dot ${data && !error ? 'green' : 'gold'}`}
                 />
-                {loading && !data
-                  ? 'Connecting to API'
-                  : data && !error
-                    ? 'API connected'
-                    : 'API unavailable'}
+                {portfolio
+                  ? data && !error
+                    ? 'Browser session'
+                    : 'Browser session unavailable'
+                  : loading && !data
+                    ? 'Connecting to API'
+                    : data && !error
+                      ? 'API connected'
+                      : 'API unavailable'}
               </Badge>
             </span>
             <button
@@ -211,12 +219,29 @@ export default function App() {
             </div>
             {view === 'overview' ? (
               <button className="primary" onClick={() => navigate('models')}>
-                Open model registry <ArrowRight size={18} aria-hidden="true" />
+                {portfolio ? 'Explore Iris' : 'Open model registry'}{' '}
+                <ArrowRight size={18} aria-hidden="true" />
               </button>
             ) : (
-              <span className="workspace-mode">Development workspace</span>
+              <span className="workspace-mode">
+                {portfolio ? 'Standalone portfolio' : 'Development workspace'}
+              </span>
             )}
           </div>
+          {portfolio && (
+            <div className="preview-notice">
+              <Box size={22} aria-hidden="true" />
+              <div>
+                <strong>Real predictions · browser session</strong>
+                <p>
+                  Iris runs in your browser using exported model parameters.
+                  Predictions, previews and Activity reset when you reload. Live
+                  Kubernetes, monitoring and AI controls require the connected
+                  workspace.
+                </p>
+              </div>
+            </div>
+          )}
           {error && (
             <div className="connection-error">
               <ErrorNotice message={error} />
@@ -232,16 +257,25 @@ export default function App() {
           {loading && !data ? (
             <div className="loading-state" role="status">
               <RefreshCw size={24} className="spinning" />
-              <h3>Connecting to your workspace</h3>
-              <p>Loading model records and service status…</p>
+              <h3>
+                {portfolio
+                  ? 'Preparing your browser session'
+                  : 'Connecting to your workspace'}
+              </h3>
+              <p>
+                {portfolio
+                  ? 'Loading the prepared Iris model…'
+                  : 'Loading model records and service status…'}
+              </p>
             </div>
           ) : data ? (
             <>
               {view === 'overview' && (
-                <Overview data={data} navigate={navigate} />
+                <Overview data={data} navigate={navigate} mode={runtime.mode} />
               )}
               <div hidden={view !== 'models'}>
                 <Models
+                  mode={runtime.mode}
                   models={data.models}
                   refresh={refresh}
                   isActive={view === 'models'}
@@ -249,6 +283,7 @@ export default function App() {
               </div>
               <div hidden={view !== 'deployments'}>
                 <Deployments
+                  mode={runtime.mode}
                   models={data.models}
                   plans={data.plans}
                   cluster={data.cluster}
@@ -257,14 +292,18 @@ export default function App() {
                 />
               </div>
               <div hidden={view !== 'assistant'}>
-                <Assistant health={data.health} />
+                <Assistant health={data.health} mode={runtime.mode} />
               </div>
               {view === 'activity' && (
                 <>
                   <div className="section-toolbar">
                     <div>
                       <h2>The ship’s log</h2>
-                      <p>Real events recorded by the backend.</p>
+                      <p>
+                        {portfolio
+                          ? 'Actual actions from this browser session · latest 50 events.'
+                          : 'Real events recorded by the backend.'}
+                      </p>
                     </div>
                     <Badge>{data.events.length} events</Badge>
                   </div>
@@ -287,8 +326,9 @@ export default function App() {
                       ))
                     ) : (
                       <Empty title="No activity recorded">
-                        Train a model, run a prediction, or generate a
-                        deployment preview to get started.
+                        {portfolio
+                          ? 'Run a browser prediction or generate a deployment preview to get started.'
+                          : 'Train a model, run a prediction, or generate a deployment preview to get started.'}
                       </Empty>
                     )}
                   </section>
@@ -296,8 +336,16 @@ export default function App() {
               )}
             </>
           ) : (
-            <Empty title="Your backend is not connected">
-              Start the API and retry to load your workspace.
+            <Empty
+              title={
+                portfolio
+                  ? 'Your browser session is unavailable'
+                  : 'Your backend is not connected'
+              }
+            >
+              {portfolio
+                ? 'Review the error above and reload to prepare a new session.'
+                : 'Start the API and retry to load your workspace.'}
             </Empty>
           )}
           <footer>

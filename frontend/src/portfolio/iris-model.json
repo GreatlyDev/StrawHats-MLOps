@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "id": "iris-classifier",
+  "name": "Iris classifier",
+  "version": "1.0.0",
+  "feature_names": [
+    "sepal length (cm)",
+    "sepal width (cm)",
+    "petal length (cm)",
+    "petal width (cm)"
+  ],
+  "labels": [
+    "setosa",
+    "versicolor",
+    "virginica"
+  ],
+  "classes": [
+    0,
+    1,
+    2
+  ],
+  "scaler_mean": [
+    5.841666666667,
+    3.048333333333,
+    3.77,
+    1.205
+  ],
+  "scaler_scale": [
+    0.837415003979,
+    0.446651119132,
+    1.76113599702,
+    0.759478988079
+  ],
+  "coefficients": [
+    [
+      -1.088944939783,
+      1.024207628102,
+      -1.799056089269,
+      -1.68622819476
+    ],
+    [
+      0.53633653891,
+      -0.360486982118,
+      -0.204074184342,
+      -0.807957030581
+    ],
+    [
+      0.552608400873,
+      -0.663720645985,
+      2.003130273611,
+      2.494185225341
+    ]
+  ],
+  "intercepts": [
+    -0.305586721769,
+    1.908555544143,
+    -1.602968822374
+  ],
+  "metrics": {
+    "accuracy": 0.9333333333333333,
+    "f1_macro": 0.9333333333333332,
+    "train_accuracy": 0.9583333333333334,
+    "train_samples": 120,
+    "test_samples": 30
+  },
+  "training_split": {
+    "train_samples": 120,
+    "test_samples": 30,
+    "random_state": 42,
+    "stratified": true
+  },
+  "provenance": {
+    "algorithm": "StandardScaler + LogisticRegression",
+    "scikit_learn": "1.7.2",
+    "model_source_sha256": "f196e59903ed1da7045786bfd8b56c7e6e8423c8429eaeacf185910db2f3904c",
+    "dataset_source": "https://scikit-learn.org/1.7/datasets/toy_dataset.html#iris-plants-dataset"
+  },
+  "content_sha256": "1c1b28c2dfcc7c53dfb2800b33ea2b36c7919a9f511ea878a1e0fa7258874ba3"
+}

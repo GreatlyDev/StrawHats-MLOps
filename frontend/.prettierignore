@@ -1,0 +1,4 @@
+# Canonical public assets are generated and checked by scripts.portfolio.export_iris.
+src/portfolio/iris-model.json
+tests/fixtures/iris-oracle.json
+tests/fixtures/preview-oracle.json

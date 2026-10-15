@@ -4,6 +4,7 @@ import { Send, ArrowUpRight } from 'lucide-react';
 import { request } from '../api';
 import { assistantContext } from '../assistant-context';
 import type { Health, Message } from '../types';
+import type { Runtime } from '../runtime';
 import { Badge, ErrorNotice } from './shared';
 import { TransponderSnail } from './CrewArt';
 const suggestions = [
@@ -11,7 +12,47 @@ const suggestions = [
   'Explain my model evaluation metrics.',
   'What should I monitor after deployment?',
 ];
-export default function Assistant({ health }: { health: Health }) {
+export default function Assistant({
+  health,
+  mode,
+}: {
+  health: Health;
+  mode: Runtime['mode'];
+}) {
+  return mode === 'portfolio' ? (
+    <section className="card assistant-card">
+      <div className="assistant-channel">
+        <span className="channel-mark">
+          <TransponderSnail />
+        </span>
+        <div>
+          <strong>Crew assistant</strong>
+          <small>Connected workspace required</small>
+        </div>
+      </div>
+      <div className="assistant-welcome">
+        <h3>The crew’s radio is offline.</h3>
+        <p id="portfolio-assistant-note">
+          AI guidance requires the connected backend and its server-side
+          provider credentials. Browser mode sends no prompts and generates no
+          assistant replies. You can still explore Iris predictions and export
+          deployment previews.
+        </p>
+        <button
+          className="primary"
+          disabled
+          aria-describedby="portfolio-assistant-note"
+        >
+          Send message
+        </button>
+      </div>
+    </section>
+  ) : (
+    <ConnectedAssistant health={health} />
+  );
+}
+
+function ConnectedAssistant({ health }: { health: Health }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);

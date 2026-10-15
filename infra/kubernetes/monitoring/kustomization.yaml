@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - prometheus-workload.yaml
+  - grafana-workload.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: strawhats-mlops
+      app.kubernetes.io/managed-by: strawhats-local-monitoring
+    includeSelectors: false
+    includeTemplates: true
+configMapGenerator:
+  - name: prometheus-config
+    namespace: strawhats-monitoring-local
+    files: [configs/prometheus.yaml, configs/iris-alerts.yaml]
+  - name: grafana-datasource
+    namespace: strawhats-monitoring-local
+    files: [configs/datasources.yaml]
+  - name: grafana-provider
+    namespace: strawhats-monitoring-local
+    files: [configs/dashboards.yaml]
+  - name: grafana-dashboard
+    namespace: strawhats-monitoring-local
+    files: [configs/iris-dashboard.json]

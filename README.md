@@ -4,15 +4,15 @@
 
 A model operations dashboard for registering ML models, testing inference, preparing Kubernetes deployment configuration, and asking for deployment guidance through LangChain. This repository is the first local foundation of the group's ML Deployment Orchestrator.
 
-**Status:** the local dashboard connects to a verified Kubernetes operator/CRD for Iris deployment, observed status, scaling, and rollback on Docker Desktop. Cloud deployment, full monitoring/AI automation, the public demo, and demo GIF remain unfinished.
+**Status:** the connected local dashboard supports verified Iris deployment, scaling, rollback, inference and monitoring on Docker Desktop. A standalone portfolio build computes real browser predictions and exports Kubernetes previews without a backend. Cloud deployment, AI resource-adjustment workflow, public publication and the demo GIF remain unfinished.
 
 ## Team
 
 | Member | Responsibility |
 | --- | --- |
 | Great-Anthony Umukoro ([GreatlyDev](https://github.com/GreatlyDev)) | UI, integration, deployment and release decisions |
-| Mikayla Brown | Backend development |
-| Mahki Titus | Backend development |
+| Mikayla Brown ([KaylaBro0](https://github.com/KaylaBro0)) | Registry validation and persisted per-model prediction summaries |
+| Mahki Titus ([Mahki7](https://github.com/Mahki7)) | Assistant responses, input validation and bounded workspace context |
 
 Each teammate reviews, tests, and commits their contributions through feature branches and pull requests.
 
@@ -20,6 +20,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 
 - One Piece-inspired responsive React dashboard with parchment panels, nautical branding, and Overview, Models, Deployments, Assistant, and Activity.
 - Persistent SQLite model/container registry and timeline.
+- Read-only per-model prediction summaries with persisted counts, label distribution and latest-30 latency/history.
 - Reproducible Iris classifier with held-out evaluation and real local predictions.
 - Kubernetes Namespace, Deployment, and Service YAML previews with selected resources, replicas, probes, and nonroot settings; copy/download support.
 - Read-only cluster reachability check that reports the actual local context.
@@ -29,6 +30,7 @@ Each teammate reviews, tests, and commits their contributions through feature br
 - Namespaced Python Kubernetes operator with a bounded ModelDeployment CRD, verified local scaling and explicit rollback; see [local operator setup](infra/kubernetes/operator/README.md).
 - Opt-in Local Iris dashboard controls, restricted to one Docker Desktop namespace/resource; accepted requests remain Pending until the operator observes the change.
 - Deployed Iris predictions through the fixed local Kubernetes Service, with measured probabilities, model latency, and deployment provenance.
+- Local Iris serving telemetry, one provisioned Prometheus/Grafana dashboard, Kubernetes pod resource readings and a bounded prediction-concentration warning demo; see [local monitoring setup](infra/kubernetes/monitoring/README.md).
 
 Container registrations store metadata. The name/version Iris classifier v1.0.0 is reserved for the built-in example. Local inference supports the bundled Iris example; external images require a separately deployed endpoint. Previews do not apply workloads to a cluster.
 
@@ -46,10 +48,57 @@ FastAPI ── SQLite + local trained artifact
 
 Standalone model service: /health, /predict, /metrics
 Local Kubernetes: ModelDeployment CRD → Python operator → Iris Deployment/Service
-Future: Prometheus/Grafana + bounded AI adjustment + cloud release
+Local monitoring: Iris /metrics → Prometheus → Grafana + concentration alert
+Standalone portfolio: exported Iris → browser inference + session YAML previews
+Future: bounded AI adjustment + cloud release
 ```
 
-The dashboard does not receive provider keys. Local records and model artifacts live in `.local/`, which is excluded from Git. Prometheus counters reset with the process; dashboard totals persist in SQLite. Median latency covers the last 30 recorded predictions.
+The connected dashboard does not receive provider keys. Its local records and trained artifacts live in `.local/`, which is excluded from Git. Prometheus counters reset with the process; workspace totals persist in SQLite. Median latency covers the last 30 recorded predictions.
+
+## Runtime modes
+
+The mode is chosen explicitly when Vite starts or builds. `VITE_APP_MODE` defaults to `workspace`; an API outage remains an error and never switches modes.
+
+| Feature | `workspace` | `portfolio` |
+| --- | --- | --- |
+| Iris predictions | Trained backend artifact; deployed model in Local Iris | Real computation in the browser using exported parameters |
+| Models | Persistent registry and training | One prepared Iris example; no training or registration |
+| YAML previews | Saved in SQLite; copy/download | Up to 50 saved per page session; copy/download |
+| Overview and Activity | Backend records and measured workspace predictions | Actual browser actions; last 30 predictions and 50 events |
+| Kubernetes and monitoring | Connected local operator and serving telemetry | Unavailable; previews make no cluster changes |
+| AI assistant | Server-side provider configuration required | Unavailable; no prompts or provider requests |
+
+Portfolio state is held in memory for the current page session. Navigation within the dashboard preserves it; reload or opening a new page starts over. Latency measures computation on the visitor's device, not a network round trip. Browser mode does not connect to the API, Kubernetes or an AI provider.
+
+The public model asset exports the existing StandardScaler/logistic-regression pipeline, actual evaluation metrics, feature/class ordering and source provenance. It is prepared before publication; loading it is not new training. Numerical tests compare all 150 Iris dataset rows, walkthrough inputs and boundary cases against independently computed Python probabilities within `1e-10`. Exported parameters use 12 decimal places; oracle probabilities use 11 to avoid cross-platform rounding-boundary differences.
+
+To build and preview the standalone site locally from `frontend` in PowerShell:
+
+```powershell
+$env:VITE_APP_MODE = 'portfolio'
+$env:VITE_API_BASE_URL = ''
+npm.cmd run build
+npm.cmd run preview
+```
+
+Open [the portfolio preview](http://127.0.0.1:4173). Run predictions in Models, enter a draft serving-image reference in Deployments, generate/export its YAML, and inspect session counts and Activity. Draft references are not proof that an image exists or is runnable.
+
+For connected development, stop the preview, remove those overrides and start the backend and frontend as described below:
+
+```powershell
+Remove-Item Env:VITE_APP_MODE, Env:VITE_API_BASE_URL -ErrorAction SilentlyContinue
+```
+
+In a POSIX shell, use `VITE_APP_MODE=portfolio VITE_API_BASE_URL= npm run build`. Rebuild after changing modes; `vite preview` serves the already built mode. Unsupported mode values and portfolio builds with a nonempty `VITE_API_BASE_URL` fail with a configuration error.
+
+Regenerate or verify the public assets from the repository root with the locked backend dependencies installed:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.portfolio.export_iris
+.\.venv\Scripts\python.exe -m scripts.portfolio.export_iris --check
+```
+
+This also maintains the independent backend YAML oracle used by preview tests. These three public JSON assets are intentional source files; private trained artifacts and workspace data remain ignored.
 
 ## Requirements and setup
 
@@ -99,13 +148,19 @@ For Iris, features are sepal length, sepal width, petal length, and petal width 
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest backend/tests -q --disable-plugin-autoload
-.\.venv\Scripts\python.exe -m ruff check backend
-.\.venv\Scripts\python.exe -m ruff format --check backend
+.\.venv\Scripts\python.exe -m ruff check backend scripts/cloud scripts/monitoring scripts/portfolio
+.\.venv\Scripts\python.exe -m ruff format --check backend scripts/cloud scripts/monitoring scripts/portfolio
 .\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m scripts.portfolio.export_iris --check
 cd frontend
 npm.cmd test
 npm.cmd run format:check
+$env:VITE_APP_MODE = 'workspace'
+$env:VITE_API_BASE_URL = ''
 npm.cmd run build
+$env:VITE_APP_MODE = 'portfolio'
+npm.cmd run build
+Remove-Item Env:VITE_APP_MODE, Env:VITE_API_BASE_URL
 ```
 
 Tests exercise persistence, input rejection, real predictions, manifest contents, measured metrics, provider error handling, model-service health/inference, and browser API transport. No provider calls or cluster writes occur during tests. Browser verification covers local training, inference, YAML export, navigation, and responsive layouts.
@@ -115,7 +170,7 @@ Tests exercise persistence, input rejection, real predictions, manifest contents
 ### Local Iris dashboard controls
 
 Install the [local operator](infra/kubernetes/operator/README.md), including the
-verified `strawhats-iris:milestone-one` image. Install
+verified `strawhats-iris:local-monitoring` image. Install
 `backend/requirements-operator.txt` in the backend environment. Set
 `LOCAL_OPERATOR_ENABLED=1` in `.env.local` and restart the backend, then open
 **Deployments → Local Iris**.
@@ -171,7 +226,7 @@ The [EKS release instructions](infra/README.md) cover the prepared one-worker AW
 
 `backend/Dockerfile` is a separate orchestrator API image. It needs persistent storage for `/app/.local` and runtime environment secrets. It does not include kubectl. Do not deploy the current management API publicly until authentication/authorization, request budgets, shared persistence, and production CORS are implemented.
 
-For a future Vercel frontend project, select `frontend` as the root directory, Vite as the framework, `npm run build`, and output directory `dist`. Set `VITE_API_BASE_URL` to the verified HTTPS backend origin before building. Only public configuration belongs in Vite variables. The Kubernetes operator and model workloads run in Kubernetes.
+For a standalone Vercel frontend project, select `frontend` as the root directory, Vite as the framework, `npm run build`, and output directory `dist`. Set `VITE_APP_MODE=portfolio` and leave `VITE_API_BASE_URL` unset. This build needs no running backend or cluster. Publication remains pending. A future connected public build requires `VITE_APP_MODE=workspace`, a verified HTTPS backend origin, and production API safeguards first. Only public configuration belongs in Vite variables; provider credentials stay on the server. The Kubernetes operator and model workloads run in Kubernetes.
 
 ## Contributing
 
@@ -181,7 +236,7 @@ Read the [API contract](docs/api-contract.md) before changing backend interfaces
 
 Format frontend changes with `npm run format` in `frontend`, and backend changes with `python -m ruff format backend` from the repository root.
 
-Commit source, tests, maintained documentation, dependency lock files, and build configuration. Keep credentials, local data, generated artifacts, planning notes, and teammate handoff packages out of Git. `.env.example` contains placeholders only; real environment files stay local.
+Commit source, tests, maintained documentation, dependency lock files, build configuration and the reproducible public portfolio model/test fixtures. Keep credentials, local data, private generated artifacts, planning notes, and teammate handoff packages out of Git. `.env.example` contains placeholders only; real environment files stay local.
 
 ## Live demo and GIF
 

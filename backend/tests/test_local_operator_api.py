@@ -63,7 +63,7 @@ class LocalCluster:
             },
             "spec": {
                 "mode": "Deploy",
-                "image": "strawhats-iris:milestone-one",
+                "image": "strawhats-iris:local-monitoring",
                 "imagePullPolicy": "Never",
                 "replicas": 1,
                 "cpuMillicores": 250,
@@ -72,11 +72,11 @@ class LocalCluster:
             "status": {
                 "observedGeneration": 7,
                 "phase": "Ready",
-                "image": "strawhats-iris:milestone-one",
+                "image": "strawhats-iris:local-monitoring",
                 "readyReplicas": 1,
                 "replicas": 1,
                 "lastReadySpec": {
-                    "image": "strawhats-iris:milestone-one",
+                    "image": "strawhats-iris:local-monitoring",
                     "imagePullPolicy": "Never",
                     "replicas": 1,
                     "cpuMillicores": 250,
@@ -241,7 +241,7 @@ def test_deploy_creates_only_the_fixed_cr_and_reports_acceptance(enabled_api):
             "metadata": {"name": "iris", "namespace": "strawhats-operator-local"},
             "spec": {
                 "mode": "Deploy",
-                "image": "strawhats-iris:milestone-one",
+                "image": "strawhats-iris:local-monitoring",
                 "imagePullPolicy": "Never",
                 "replicas": 1,
                 "cpuMillicores": 250,
@@ -254,6 +254,10 @@ def test_deploy_creates_only_the_fixed_cr_and_reports_acceptance(enabled_api):
 
 def test_scaling_preserves_the_verified_target_after_rollback(enabled_api):
     api, cluster = enabled_api
+    cluster.resource["status"]["lastReadySpec"]["image"] = (
+        "strawhats-iris:milestone-one"
+    )
+    cluster.resource["status"]["image"] = "strawhats-iris:milestone-one"
     cluster.resource["spec"].update(mode="Rollback", image="strawhats-iris:missing")
     cluster.resource["status"]["phase"] = "RolledBack"
     response = api.post("/api/local-iris/scale", json={"replicas": 2})
@@ -519,7 +523,7 @@ def test_prediction_reaches_fixed_service_without_workspace_artifacts(deployed_s
         "context": "docker-desktop",
         "namespace": "strawhats-operator-local",
         "service": "iris",
-        "image": "strawhats-iris:milestone-one",
+        "image": "strawhats-iris:local-monitoring",
         "generation": 7,
     }
     assert len(calls) == 1
@@ -655,6 +659,10 @@ def test_nonfinite_measurement_returns_validation_error_without_kubernetes(
 
 def test_prediction_after_rollback_credits_the_restored_image(deployed_service):
     api, cluster, _, _, calls = deployed_service
+    cluster.resource["status"]["lastReadySpec"]["image"] = (
+        "strawhats-iris:milestone-one"
+    )
+    cluster.resource["status"]["image"] = "strawhats-iris:milestone-one"
     cluster.resource["spec"].update(mode="Rollback", image="strawhats-iris:missing")
     cluster.resource["status"]["phase"] = "RolledBack"
     result = api.post("/api/local-iris/predict", json={"features": [1, 2, 3, 4]})
