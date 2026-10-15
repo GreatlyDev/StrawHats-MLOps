@@ -6,7 +6,7 @@ A model operations dashboard for registering ML models, testing inference, prepa
 
 **Live demo:** [strawhats-mlops.vercel.app](https://strawhats-mlops.vercel.app)
 
-**Status:** the public standalone dashboard computes real browser predictions and exports Kubernetes previews without a backend. The connected local dashboard supports verified Iris deployment, scaling, rollback, inference and monitoring on Docker Desktop. AWS deployment, the AI resource-adjustment workflow and the complete cloud demonstration remain unfinished.
+**Status:** the public standalone dashboard computes real browser predictions and exports Kubernetes previews without a backend. The connected local dashboard supports verified Iris deployment, scaling, rollback, inference and monitoring on Docker Desktop. The owner-run bounded AI resource-adjustment command is implemented; its acceptance results are documented below. AWS deployment and the complete cloud demonstration remain unfinished.
 
 ## Team
 
@@ -210,6 +210,72 @@ request began, and model time excludes the dashboard/proxy network round trip.
 The Models tab still uses the workspace's local predictor. To verify the
 Kubernetes-served model separately, port-forward its Service to loopback and run
 the existing smoke checks; this milestone does not reroute Models-tab inference.
+
+### Bounded local AI resource adjustment
+
+Start the existing local operator, Iris and [monitoring setup](infra/kubernetes/monitoring/README.md),
+including the loopback Prometheus port-forward on port 9090. Use Python 3.12 and
+the existing backend/operator requirements. Keep `OPENAI_API_KEY` and optionally
+`OPENAI_MODEL` (default `gpt-4.1-mini`) in the ignored root `.env.local`.
+
+```powershell
+# Read-only by default; a valid eligible decision uses one OpenAI API call.
+.venv/Scripts/python.exe -m scripts.optimization.adjust_iris
+# Explicitly permit one resource change, followed by readiness/inference checks.
+.venv/Scripts/python.exe -m scripts.optimization.adjust_iris --apply
+```
+
+The command only targets `docker-desktop`, namespace `strawhats-operator-local`,
+`ModelDeployment/iris` with the monitoring image. It requires fresh complete
+per-pod observations, at least 20 recent predictions, an inactive concentration
+warning and the current ready revision. Raw measurements, recording-rule
+dependencies and relevant rule evaluations must be at most 45 seconds old
+(allowing five seconds of clock skew); query evaluation time alone is insufficient.
+No eligible change, an active five-minute
+cooldown or missing credentials makes no AI request. Generate balanced real
+predictions before running it; do not fabricate metrics or repeatedly call until
+the AI agrees to change a setting.
+
+Deterministic policy offers one-step CPU requests of 100/250/500m or memory
+requests of 128/256/512Mi. It uses the busiest pod: CPU increases at 75% request
+utilization and decreases at 20% only with at most 50% utilization of the smaller
+request; memory increases at 80% and decreases at 50% only with at most 60%
+utilization of the smaller request. CPU or memory pressure excludes decreases.
+The existing operator sets limits to twice the requests (at most 1000m/1024Mi).
+One command changes at most one field; image, replicas and the other request stay
+fixed. LangChain/OpenAI selects an offered action or Hold, never commands or YAML.
+These bounds are project guardrails, not performance or cost guarantees.
+
+After the decision, the command rechecks the revision, pod UIDs, fresh metrics and
+eligibility within 60 seconds. One optimistic patch includes UID/resourceVersion
+and two cooldown annotations; conflicts and uncertain write outcomes never retry.
+It waits at most 180 seconds for that exact observed revision, ready owned pods
+and endpoints, and a valid prediction through the Iris Service. A definite failed
+rollout permits one restoration of the captured prior settings only while the
+written UID/generation/spec/run ID still match, with another 180-second verification
+bound. A newer manual change is never overwritten. Hold/preview paths make no
+cluster writes. This command adds no scheduler or public management endpoint.
+
+Sanitized timestamped evidence, including prior settings, is stored atomically
+under ignored `.local/optimization/` before mutation. Exit status is zero for
+`held`, `preview`, or verified `applied`; `restored` means the adjustment failed
+but recovery verified, while `unavailable`/`unresolved` require inspection and
+exit nonzero. Evidence and provider credentials must remain outside Git.
+
+The operator's `lastReadySpec` is the **latest ready** configuration. Dashboard
+rollback after a successful adjustment does not recover an older historical
+configuration; the command's evidence retains the pre-adjustment settings.
+
+Local automated acceptance covers policy thresholds, real LangChain request
+serialization, concurrency conflicts, invalid/stale observations, bounded waits,
+failed rollouts and guarded restoration through controlled external transports.
+On October 15, 2026, 60 genuine balanced Service predictions produced healthy
+two-pod telemetry and an eligible CPU decrease from 250m to 100m. The single live
+OpenAI preview request was rate-limited, so no adjustment was applied and no second
+provider call was made. **Live AI-selected adjustment/readiness acceptance remains
+pending.** Restoration/conflict behavior is verified in automated transport tests,
+not by deliberately breaking the running cluster. The public dashboard remains
+independent of this provider and local cluster.
 
 Build from the repository root after starting Docker:
 

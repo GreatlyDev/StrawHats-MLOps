@@ -17,25 +17,32 @@ class LocalCluster:
     def __init__(self, sdk, custom, apps):
         self.sdk, self.custom, self.apps = sdk, custom, apps
 
-    def resource(self):
+    def resource(self, *, request_timeout=TIMEOUT):
         from kubernetes.client.exceptions import ApiException
 
         try:
             return self.custom.get_namespaced_custom_object(
-                GROUP, VERSION, NAMESPACE, PLURAL, NAME, _request_timeout=TIMEOUT
+                GROUP,
+                VERSION,
+                NAMESPACE,
+                PLURAL,
+                NAME,
+                _request_timeout=request_timeout,
             )
         except ApiException as error:
             if error.status == 404:
                 return None
             raise
 
-    def controller_ready(self) -> bool:
+    def controller_ready(self, *, request_timeout=TIMEOUT) -> bool:
         from kubernetes.client.exceptions import ApiException
 
         try:
             deployment = self.sdk.sanitize_for_serialization(
                 self.apps.read_namespaced_deployment(
-                    "strawhats-model-operator", NAMESPACE, _request_timeout=TIMEOUT
+                    "strawhats-model-operator",
+                    NAMESPACE,
+                    _request_timeout=request_timeout,
                 )
             )
         except ApiException as error:

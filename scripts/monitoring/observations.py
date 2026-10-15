@@ -30,11 +30,29 @@ LABELS = {"setosa", "versicolor", "virginica"}
 CLASS_COUNT = 'count by(instance)(strawhats_model_prediction_class_total{job="iris-model",label=~"setosa|versicolor|virginica"})'
 CPU = 'rate(process_cpu_seconds_total{job="iris-model"}[2m])'
 MEMORY = 'process_resident_memory_bytes{job="iris-model"}'
+RAW_CPU = 'process_cpu_seconds_total{job="iris-model"}'
+RAW_CLASSES = 'strawhats_model_prediction_class_total{job="iris-model",label=~"setosa|versicolor|virginica"}'
+RECORDINGS = (
+    "iris:target_count",
+    "iris:telemetry_available",
+    "iris:class_predictions:increase2m",
+    "iris:predictions:increase2m",
+    "iris:class_share:ratio2m",
+)
 EVIDENCE = Path(__file__).resolve().parents[2] / ".local" / "milestone-four"
 
 
 class MonitoringError(RuntimeError):
     """A local verification failed without making an infrastructure change."""
+
+
+@dataclass(frozen=True)
+class PodUsage:
+    name: str
+    uid: str
+    cpu_cores: float
+    resident_bytes: float
+    sample_time: float
 
 
 @dataclass(frozen=True)
@@ -51,6 +69,7 @@ class Observation:
     target_pods: tuple[str, ...] = ()
     alert_labels: dict[str, str] = field(default_factory=dict)
     resource_uid: str = ""
+    pod_usage: tuple[PodUsage, ...] = ()
 
 
 def require_snapshot(
@@ -59,10 +78,23 @@ def require_snapshot(
     *,
     expected_uid: str | None = None,
     before_request: Callable[[], None] | None = None,
+    request_timeout=None,
 ) -> dict:
     if before_request:
         before_request()
-    resource = cluster.resource()
+
+    def options():
+        return (
+            {}
+            if request_timeout is None
+            else {
+                "request_timeout": request_timeout()
+                if callable(request_timeout)
+                else request_timeout
+            }
+        )
+
+    resource = cluster.resource(**options())
     try:
         target = choose_target(resource)
         metadata, status = resource["metadata"], resource["status"]
@@ -87,7 +119,7 @@ def require_snapshot(
     if valid:
         if before_request:
             before_request()
-        valid = cluster.controller_ready()
+        valid = cluster.controller_ready(**options())
     if not valid:
         raise MonitoringError(
             "Local Iris must have a current ready controller, observed revision and monitoring image. Stop if the deployment changes."
@@ -168,14 +200,150 @@ def _instances(rows):
 
 
 def _fresh(target):
+    return _fresh_time(target.get("lastScrape"))
+
+
+def _fresh_time(value):
     try:
-        if not isinstance(target.get("lastScrape"), str):
+        if not isinstance(value, str):
             return False
-        stamped = datetime.fromisoformat(target["lastScrape"].replace("Z", "+00:00"))
+        stamped = datetime.fromisoformat(value.replace("Z", "+00:00"))
         age = (datetime.now(timezone.utc) - stamped).total_seconds()
         return -5 <= age <= 45
     except (KeyError, TypeError, ValueError):
         return False
+
+
+def _pod_usage(pods, targets, cpu_rows, memory_rows, source_times):
+    """Keep per-instance measurements attributed to the observed pod identity."""
+    try:
+        cpus = {row["metric"]["instance"]: row for row in cpu_rows}
+        memories = {row["metric"]["instance"]: row for row in memory_rows}
+        if len(cpus) != len(cpu_rows) or len(memories) != len(memory_rows):
+            return ()
+        identities = {pod["metadata"]["name"]: pod["metadata"]["uid"] for pod in pods}
+        result = []
+        for target in targets:
+            labels = target["labels"]
+            cpu, memory = cpus[labels["instance"]], memories[labels["instance"]]
+            times = (
+                cpu["value"][0],
+                memory["value"][0],
+                source_times[labels["instance"]],
+            )
+            if not all(
+                type(value) in (int, float) and math.isfinite(value) for value in times
+            ):
+                return ()
+            if _number(cpu) is None or _number(memory) is None:
+                return ()
+            result.append(
+                PodUsage(
+                    labels["pod"],
+                    identities[labels["pod"]],
+                    _number(cpu),
+                    _number(memory),
+                    min(times),
+                )
+            )
+        return tuple(sorted(result, key=lambda pod: pod.name))
+    except (KeyError, IndexError, TypeError):
+        return ()
+
+
+def _fresh_sample(row):
+    try:
+        timestamp = row["value"][0]
+        return (
+            type(timestamp) in (int, float)
+            and math.isfinite(timestamp)
+            and -5 <= datetime.now(timezone.utc).timestamp() - timestamp <= 45
+        )
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
+def _source_times(query, targets):
+    """timestamp() returns source age in value[1]; value[0] is evaluation time."""
+    expected = {target["labels"]["instance"]: target["labels"] for target in targets}
+    values = {}
+    for selector in (RAW_CPU, MEMORY, RAW_CLASSES, *RECORDINGS):
+        rows = query(f"timestamp({selector})")
+        raw = selector in (RAW_CPU, MEMORY, RAW_CLASSES)
+        labelled = selector in (
+            RAW_CLASSES,
+            "iris:class_predictions:increase2m",
+            "iris:class_share:ratio2m",
+        )
+        wanted = (
+            {(instance, label) for instance in expected for label in LABELS}
+            if raw and labelled
+            else set(expected)
+            if raw
+            else LABELS
+            if labelled
+            else {"scalar"}
+        )
+        samples = {}
+        for row in rows:
+            labels = row["metric"]
+            instance = labels.get("instance")
+            identity = (
+                (instance, labels.get("label"))
+                if raw and labelled
+                else instance
+                if raw
+                else labels.get("label")
+                if labelled
+                else "scalar"
+            )
+            timestamp = _number(row)
+            if (
+                identity not in wanted
+                or identity in samples
+                or timestamp is None
+                or not -5 <= datetime.now(timezone.utc).timestamp() - timestamp <= 45
+                or (
+                    raw
+                    and any(
+                        labels.get(key) != expected[instance].get(key)
+                        for key in ("job", "namespace", "pod", "image")
+                    )
+                )
+            ):
+                return {}
+            samples[identity] = timestamp
+        if set(samples) != wanted:
+            return {}
+        values[selector] = samples
+    oldest_rule = min(
+        stamped for selector in RECORDINGS for stamped in values[selector].values()
+    )
+    return {
+        instance: min(
+            values[RAW_CPU][instance],
+            values[MEMORY][instance],
+            oldest_rule,
+            *(values[RAW_CLASSES][instance, label] for label in LABELS),
+        )
+        for instance in expected
+    }
+
+
+def _sizing_rules_valid(rules):
+    for name in (*RECORDINGS, ALERT_NAME):
+        matches = [rule for rule in rules if rule.get("name") == name]
+        if len(matches) != 1:
+            return False
+        rule = matches[0]
+        if (
+            rule.get("type") != ("alerting" if name == ALERT_NAME else "recording")
+            or rule.get("health") != "ok"
+            or rule.get("lastError")
+            or not _fresh_time(rule.get("lastEvaluation"))
+        ):
+            return False
+    return True
 
 
 def observe(
@@ -186,7 +354,13 @@ def observe(
 ) -> Observation:
     resource = require_snapshot(cluster, before_request=before_request)
     fetch = partial(_fetch, prometheus, before_request=before_request)
-    query = partial(_query, prometheus, before_request=before_request)
+    query_samples = []
+
+    def query(expression):
+        rows = _query(prometheus, expression, before_request=before_request)
+        query_samples.extend(rows)
+        return rows
+
     if before_request:
         before_request()
     pods = cluster.sdk.sanitize_for_serialization(
@@ -233,12 +407,12 @@ def observe(
             for item in targets
         )
     )
-    rules = [
+    all_rules = [
         rule
         for group in _rows(fetch("/api/v1/rules"), "groups")
         for rule in _rows(group, "rules")
-        if rule.get("name") == ALERT_NAME
     ]
+    rules = [rule for rule in all_rules if rule.get("name") == ALERT_NAME]
     rule_valid = (
         len(rules) == 1
         and rules[0].get("type") == "alerting"
@@ -251,10 +425,8 @@ def observe(
         if item.get("labels", {}).get("alertname") == ALERT_NAME
     ]
     counts = _instances(query(CLASS_COUNT))
-    cpu, memory = (
-        _instances(query(CPU)),
-        _instances(query(MEMORY)),
-    )
+    cpu_rows, memory_rows = query(CPU), query(MEMORY)
+    cpu, memory = _instances(cpu_rows), _instances(memory_rows)
     flag = _scalar(query("iris:telemetry_available"))
     recent = _scalar(query("iris:predictions:increase2m"))
     shares = {}
@@ -299,6 +471,12 @@ def observe(
         if available and alerts
         else {}
     )
+    source_times = {}
+    if available and _sizing_rules_valid(all_rules):
+        try:
+            source_times = _source_times(query, targets)
+        except MonitoringError:
+            pass  # Missing freshness evidence prevents sizing, preserving dashboard reads.
     return Observation(
         resource["metadata"]["generation"],
         IMAGE,
@@ -312,6 +490,11 @@ def observe(
         tuple(sorted(names)),
         labels,
         resource["metadata"]["uid"],
+        _pod_usage(pods, targets, cpu_rows, memory_rows, source_times)
+        if available
+        and source_times
+        and all(_fresh_sample(row) for row in query_samples)
+        else (),
     )
 
 
