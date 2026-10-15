@@ -4,7 +4,9 @@
 
 A model operations dashboard for registering ML models, testing inference, preparing Kubernetes deployment configuration, and asking for deployment guidance through LangChain. This repository is the first local foundation of the group's ML Deployment Orchestrator.
 
-**Status:** the connected local dashboard supports verified Iris deployment, scaling, rollback, inference and monitoring on Docker Desktop. A standalone portfolio build computes real browser predictions and exports Kubernetes previews without a backend. Cloud deployment, AI resource-adjustment workflow, public publication and the demo GIF remain unfinished.
+**Live demo:** [strawhats-mlops.vercel.app](https://strawhats-mlops.vercel.app)
+
+**Status:** the public standalone dashboard computes real browser predictions and exports Kubernetes previews without a backend. The connected local dashboard supports verified Iris deployment, scaling, rollback, inference and monitoring on Docker Desktop. AWS deployment, the AI resource-adjustment workflow and the complete cloud demonstration remain unfinished.
 
 ## Team
 
@@ -226,7 +228,7 @@ The [EKS release instructions](infra/README.md) cover the prepared one-worker AW
 
 `backend/Dockerfile` is a separate orchestrator API image. It needs persistent storage for `/app/.local` and runtime environment secrets. It does not include kubectl. Do not deploy the current management API publicly until authentication/authorization, request budgets, shared persistence, and production CORS are implemented.
 
-For a standalone Vercel frontend project, select `frontend` as the root directory, Vite as the framework, `npm run build`, and output directory `dist`. Set `VITE_APP_MODE=portfolio` and leave `VITE_API_BASE_URL` unset. This build needs no running backend or cluster. Publication remains pending. A future connected public build requires `VITE_APP_MODE=workspace`, a verified HTTPS backend origin, and production API safeguards first. Only public configuration belongs in Vite variables; provider credentials stay on the server. The Kubernetes operator and model workloads run in Kubernetes.
+The public Vercel project uses `frontend` as its root directory, Vite, Node.js 24, `npm ci`, `npm run build`, and output directory `dist`. Set `VITE_APP_MODE=portfolio` and leave `VITE_API_BASE_URL` empty or unset. This build needs no running backend or cluster. Only public configuration belongs in Vite variables; provider credentials stay on the server. Kubernetes controls remain in the owner's connected workspace. The Kubernetes operator and model workloads run in Kubernetes.
 
 ## Contributing
 
@@ -236,11 +238,17 @@ Read the [API contract](docs/api-contract.md) before changing backend interfaces
 
 Format frontend changes with `npm run format` in `frontend`, and backend changes with `python -m ruff format backend` from the repository root.
 
-Commit source, tests, maintained documentation, dependency lock files, build configuration and the reproducible public portfolio model/test fixtures. Keep credentials, local data, private generated artifacts, planning notes, and teammate handoff packages out of Git. `.env.example` contains placeholders only; real environment files stay local.
+Commit source, tests, maintained documentation, dependency lock files, build configuration, the reproducible public portfolio model/test fixtures and the intentional public demo GIF. Keep credentials, local data, private generated artifacts, planning notes, and teammate handoff packages out of Git. `.env.example` contains placeholders only; real environment files stay local.
 
 ## Live demo and GIF
 
-The current verified demo runs locally at `http://127.0.0.1:5173`. A public live URL and embedded GIF will be added after cloud deployment and the complete demonstration flow are verified.
+Open [the public standalone demo](https://strawhats-mlops.vercel.app). No sign-in is required. In **Models**, run the default Iris input for setosa, then try `[6.7, 3.0, 5.2, 2.3]` for virginica. In **Deployments**, enter a draft serving-image reference, generate a preview, and copy or download its YAML. **Activity** records those actual browser actions; reload starts a fresh session.
+
+The following GIF sequences actual screenshots captured from the public site on October 15, 2026: real predictions, an exported preview, session Activity and measured Overview counts. It shows the standalone workflow; AWS deployment, live cluster operations and automated AI adjustment are not demonstrated in this recording.
+
+![Public standalone Iris predictions, YAML preview and session Activity](assets/demo.gif)
+
+The connected workspace remains available locally at `http://127.0.0.1:5173` using the setup above. The full cloud demonstration will be recorded after EKS deployment and its acceptance checks pass. The public site remains useful when that temporary cluster is shut down.
 
 ## License
 
