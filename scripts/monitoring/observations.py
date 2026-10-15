@@ -38,6 +38,15 @@ class MonitoringError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class PodUsage:
+    name: str
+    uid: str
+    cpu_cores: float
+    resident_bytes: float
+    sample_time: float
+
+
+@dataclass(frozen=True)
 class Observation:
     generation: int
     image: str
@@ -51,6 +60,7 @@ class Observation:
     target_pods: tuple[str, ...] = ()
     alert_labels: dict[str, str] = field(default_factory=dict)
     resource_uid: str = ""
+    pod_usage: tuple[PodUsage, ...] = ()
 
 
 def require_snapshot(
@@ -178,6 +188,51 @@ def _fresh(target):
         return False
 
 
+def _pod_usage(pods, targets, cpu_rows, memory_rows):
+    """Keep per-instance measurements attributed to the observed pod identity."""
+    try:
+        cpus = {row["metric"]["instance"]: row for row in cpu_rows}
+        memories = {row["metric"]["instance"]: row for row in memory_rows}
+        if len(cpus) != len(cpu_rows) or len(memories) != len(memory_rows):
+            return ()
+        identities = {pod["metadata"]["name"]: pod["metadata"]["uid"] for pod in pods}
+        result = []
+        for target in targets:
+            labels = target["labels"]
+            cpu, memory = cpus[labels["instance"]], memories[labels["instance"]]
+            times = (cpu["value"][0], memory["value"][0])
+            if not all(
+                type(value) in (int, float) and math.isfinite(value) for value in times
+            ):
+                return ()
+            if _number(cpu) is None or _number(memory) is None:
+                return ()
+            result.append(
+                PodUsage(
+                    labels["pod"],
+                    identities[labels["pod"]],
+                    _number(cpu),
+                    _number(memory),
+                    min(times),
+                )
+            )
+        return tuple(sorted(result, key=lambda pod: pod.name))
+    except (KeyError, IndexError, TypeError):
+        return ()
+
+
+def _fresh_sample(row):
+    try:
+        timestamp = row["value"][0]
+        return (
+            type(timestamp) in (int, float)
+            and math.isfinite(timestamp)
+            and -5 <= datetime.now(timezone.utc).timestamp() - timestamp <= 45
+        )
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
 def observe(
     cluster: LocalCluster,
     prometheus: httpx.Client,
@@ -186,7 +241,13 @@ def observe(
 ) -> Observation:
     resource = require_snapshot(cluster, before_request=before_request)
     fetch = partial(_fetch, prometheus, before_request=before_request)
-    query = partial(_query, prometheus, before_request=before_request)
+    query_samples = []
+
+    def query(expression):
+        rows = _query(prometheus, expression, before_request=before_request)
+        query_samples.extend(rows)
+        return rows
+
     if before_request:
         before_request()
     pods = cluster.sdk.sanitize_for_serialization(
@@ -251,10 +312,8 @@ def observe(
         if item.get("labels", {}).get("alertname") == ALERT_NAME
     ]
     counts = _instances(query(CLASS_COUNT))
-    cpu, memory = (
-        _instances(query(CPU)),
-        _instances(query(MEMORY)),
-    )
+    cpu_rows, memory_rows = query(CPU), query(MEMORY)
+    cpu, memory = _instances(cpu_rows), _instances(memory_rows)
     flag = _scalar(query("iris:telemetry_available"))
     recent = _scalar(query("iris:predictions:increase2m"))
     shares = {}
@@ -312,6 +371,9 @@ def observe(
         tuple(sorted(names)),
         labels,
         resource["metadata"]["uid"],
+        _pod_usage(pods, targets, cpu_rows, memory_rows)
+        if available and all(_fresh_sample(row) for row in query_samples)
+        else (),
     )
 
 

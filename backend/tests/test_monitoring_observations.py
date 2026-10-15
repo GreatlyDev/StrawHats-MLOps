@@ -212,6 +212,62 @@ def test_observation_matches_two_owned_targets_and_real_metric_values(
     assert result.alert_state == "inactive"
 
 
+def test_sizing_samples_keep_each_pod_uid_usage_and_older_timestamp(
+    monitoring, cluster, responses
+):
+    stamped = datetime.now(timezone.utc).timestamp()
+    for expression, values in (
+        (monitoring.CPU, ("0.01", "0.20")),
+        (monitoring.MEMORY, (str(60 * 2**20), str(120 * 2**20))),
+    ):
+        for index, row in enumerate(responses["queries"][expression]["result"]):
+            row["value"] = [
+                stamped - (3 if expression == monitoring.CPU else 8),
+                values[index],
+            ]
+    with prom_client(responses) as prom:
+        result = monitoring.observe(cluster, prom)
+    assert [
+        (p.name, p.uid, p.cpu_cores, p.resident_bytes, p.sample_time)
+        for p in result.pod_usage
+    ] == [
+        ("iris-abc-a", "pod-a", 0.01, 60 * 2**20, stamped - 8),
+        ("iris-abc-b", "pod-b", 0.20, 120 * 2**20, stamped - 8),
+    ]
+
+
+@pytest.mark.parametrize("bad", [None, "old", True, 1e308])
+def test_invalid_query_time_never_creates_usable_sizing_samples(
+    monitoring, cluster, responses, bad
+):
+    responses["queries"][monitoring.CPU]["result"][0]["value"][0] = bad
+    with prom_client(responses) as prom:
+        result = monitoring.observe(cluster, prom)
+    assert result.pod_usage == ()
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        'rate(process_cpu_seconds_total{job="iris-model"}[2m])',
+        'process_resident_memory_bytes{job="iris-model"}',
+        "iris:predictions:increase2m",
+        "iris:telemetry_available",
+        "iris:class_share:ratio2m",
+    ],
+)
+@pytest.mark.parametrize("age", [46, -6])
+def test_any_stale_or_future_numeric_query_blocks_sizing(
+    monitoring, cluster, responses, expression, age
+):
+    responses["queries"][expression]["result"][0]["value"][0] = (
+        datetime.now(timezone.utc).timestamp() - age
+    )
+    with prom_client(responses) as prom:
+        result = monitoring.observe(cluster, prom)
+    assert result.pod_usage == ()
+
+
 @pytest.mark.parametrize(
     "fault",
     [
