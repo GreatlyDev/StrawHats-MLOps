@@ -63,7 +63,15 @@ def provider(advisor, monkeypatch):
                 "object": "chat.completion",
                 "created": 1792083600,
                 "model": "gpt-4.1-mini",
-                "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+                "choices": []
+                if outcome.get("empty_choices")
+                else [
+                    {
+                        "index": 0,
+                        "message": message,
+                        "finish_reason": outcome.get("finish_reason", "stop"),
+                    }
+                ],
                 "usage": {
                     "prompt_tokens": 100,
                     "completion_tokens": 30,
@@ -74,7 +82,7 @@ def provider(advisor, monkeypatch):
 
     class ControlledClient(client_type):
         def __init__(self, *args, **kwargs):
-            kwargs["transport"] = httpx.MockTransport(respond)
+            kwargs.setdefault("transport", httpx.MockTransport(respond))
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(advisor.httpx, "Client", ControlledClient)
@@ -164,6 +172,9 @@ def test_invalid_provider_output_is_unavailable(
         ({"timeout": True}, "provider"),
         ({"connection": True}, "provider"),
         ({"refusal": True}, "decision"),
+        ({"finish_reason": "length"}, "decision"),
+        ({"finish_reason": "content_filter"}, "decision"),
+        ({"empty_choices": True}, "decision"),
     ],
 )
 def test_provider_failure_is_sanitized_without_retry(

@@ -148,6 +148,32 @@ def responses():
             [({"instance": "a"}, 134217728), ({"instance": "b"}, 134217728)]
         ),
     }
+    sources = {
+        'process_cpu_seconds_total{job="iris-model"}': [
+            (t["labels"], now.timestamp()) for t in targets
+        ],
+        'process_resident_memory_bytes{job="iris-model"}': [
+            (t["labels"], now.timestamp()) for t in targets
+        ],
+        'strawhats_model_prediction_class_total{job="iris-model",label=~"setosa|versicolor|virginica"}': [
+            ({**t["labels"], "label": label}, now.timestamp())
+            for t in targets
+            for label in ("setosa", "versicolor", "virginica")
+        ],
+        "iris:target_count": [({}, now.timestamp())],
+        "iris:telemetry_available": [({}, now.timestamp())],
+        "iris:predictions:increase2m": [({}, now.timestamp())],
+        "iris:class_predictions:increase2m": [
+            ({"label": label}, now.timestamp())
+            for label in ("setosa", "versicolor", "virginica")
+        ],
+        "iris:class_share:ratio2m": [
+            ({"label": label}, now.timestamp())
+            for label in ("setosa", "versicolor", "virginica")
+        ],
+    }
+    for selector, rows in sources.items():
+        queries[f"timestamp({selector})"] = vector(rows)
     return {
         "targets": {"activeTargets": targets, "droppedTargets": []},
         "rules": {
@@ -165,13 +191,30 @@ def responses():
                             "health": "ok",
                             "lastError": "",
                             "state": "inactive",
+                            "lastEvaluation": now.isoformat(),
                             "query": "iris:class_share:ratio2m > 0.90",
                             "duration": 30,
                             "keepFiringFor": 0,
                             "labels": {"severity": "warning"},
                             "annotations": {},
                             "alerts": [],
-                        }
+                        },
+                        *[
+                            {
+                                "name": name,
+                                "type": "recording",
+                                "health": "ok",
+                                "lastEvaluation": now.isoformat(),
+                                "lastError": "",
+                            }
+                            for name in (
+                                "iris:target_count",
+                                "iris:telemetry_available",
+                                "iris:class_predictions:increase2m",
+                                "iris:predictions:increase2m",
+                                "iris:class_share:ratio2m",
+                            )
+                        ],
                     ],
                 }
             ]
@@ -266,6 +309,79 @@ def test_any_stale_or_future_numeric_query_blocks_sizing(
     with prom_client(responses) as prom:
         result = monitoring.observe(cluster, prom)
     assert result.pod_usage == ()
+
+
+SOURCE_SELECTORS = (
+    'process_cpu_seconds_total{job="iris-model"}',
+    'process_resident_memory_bytes{job="iris-model"}',
+    'strawhats_model_prediction_class_total{job="iris-model",label=~"setosa|versicolor|virginica"}',
+    "iris:target_count",
+    "iris:telemetry_available",
+    "iris:class_predictions:increase2m",
+    "iris:predictions:increase2m",
+    "iris:class_share:ratio2m",
+)
+
+
+@pytest.mark.parametrize("source", SOURCE_SELECTORS)
+@pytest.mark.parametrize("age", [46, -6])
+def test_current_query_time_cannot_hide_stale_or_future_source_samples(
+    monitoring, cluster, responses, source, age
+):
+    rows = responses["queries"][f"timestamp({source})"]["result"]
+    rows[0]["value"][1] = str(datetime.now(timezone.utc).timestamp() - age)
+    with prom_client(responses) as prom:
+        result = monitoring.observe(cluster, prom)
+    assert result.pod_usage == ()
+
+
+@pytest.mark.parametrize("source", SOURCE_SELECTORS)
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "invalid"])
+def test_source_timestamp_checks_require_complete_unique_finite_values(
+    monitoring, cluster, responses, source, fault
+):
+    rows = responses["queries"][f"timestamp({source})"]["result"]
+    if fault == "missing":
+        rows.pop()
+    elif fault == "duplicate":
+        rows.append(deepcopy(rows[0]))
+    else:
+        rows[0]["value"][1] = "NaN"
+    with prom_client(responses) as prom:
+        result = monitoring.observe(cluster, prom)
+    assert result.pod_usage == ()
+
+
+@pytest.mark.parametrize("fault", ["health", "old", "future", "missing", "duplicate"])
+def test_retained_recording_output_requires_healthy_recent_rule_evaluations(
+    monitoring, cluster, responses, fault
+):
+    rules = responses["rules"]["groups"][0]["rules"]
+    if fault == "health":
+        rules[1]["health"] = "err"
+    elif fault in ("old", "future"):
+        rules[1]["lastEvaluation"] = (
+            datetime.now(timezone.utc) - timedelta(seconds=46 if fault == "old" else -6)
+        ).isoformat()
+    elif fault == "missing":
+        rules.pop()
+    else:
+        rules.append(deepcopy(rules[1]))
+    with prom_client(responses) as prom:
+        result = monitoring.observe(cluster, prom)
+    assert result.pod_usage == ()
+
+
+def test_sizing_sample_age_uses_oldest_underlying_measurement(
+    monitoring, cluster, responses
+):
+    stamped = datetime.now(timezone.utc).timestamp() - 12
+    responses["queries"]['timestamp(process_cpu_seconds_total{job="iris-model"})'][
+        "result"
+    ][0]["value"][1] = str(stamped)
+    with prom_client(responses) as prom:
+        result = monitoring.observe(cluster, prom)
+    assert result.pod_usage[0].sample_time == stamped
 
 
 @pytest.mark.parametrize(

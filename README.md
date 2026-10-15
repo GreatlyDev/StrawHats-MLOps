@@ -228,7 +228,10 @@ the existing backend/operator requirements. Keep `OPENAI_API_KEY` and optionally
 The command only targets `docker-desktop`, namespace `strawhats-operator-local`,
 `ModelDeployment/iris` with the monitoring image. It requires fresh complete
 per-pod observations, at least 20 recent predictions, an inactive concentration
-warning and the current ready revision. No eligible change, an active five-minute
+warning and the current ready revision. Raw measurements, recording-rule
+dependencies and relevant rule evaluations must be at most 45 seconds old
+(allowing five seconds of clock skew); query evaluation time alone is insufficient.
+No eligible change, an active five-minute
 cooldown or missing credentials makes no AI request. Generate balanced real
 predictions before running it; do not fabricate metrics or repeatedly call until
 the AI agrees to change a setting.

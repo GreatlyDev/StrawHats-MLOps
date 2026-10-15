@@ -41,6 +41,8 @@ def recommend(
         APIConnectionError,
         APIStatusError,
         AuthenticationError,
+        ContentFilterFinishReasonError,
+        LengthFinishReasonError,
         RateLimitError,
     )
 
@@ -126,7 +128,15 @@ def recommend(
         raise RecommendationUnavailable(
             "The AI provider is unavailable; no automatic retry."
         ) from None
-    except (ValidationError, ValueError, TypeError, KeyError):
+    except (
+        ContentFilterFinishReasonError,
+        LengthFinishReasonError,
+        ValidationError,
+        ValueError,
+        TypeError,
+        KeyError,
+        IndexError,
+    ):
         raise RecommendationUnavailable(
             "The AI provider did not return a valid permitted decision."
         ) from None

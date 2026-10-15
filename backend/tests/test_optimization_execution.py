@@ -17,7 +17,10 @@ from backend.tests.test_monitoring_observations import cluster as cluster
 from backend.tests.test_monitoring_observations import monitoring as monitoring
 from backend.tests.test_monitoring_observations import prom_client
 from backend.tests.test_monitoring_observations import responses as responses
+from backend.tests.test_optimization_advisor import advisor as advisor
+from backend.tests.test_optimization_advisor import provider as provider
 from scripts.optimization.advisor import Decision, RecommendationUnavailable
+from scripts.optimization.policy import candidates, validate_snapshot
 
 STAMP = "mlops.strawhats.dev/last-adjustment-at"
 RUN = "mlops.strawhats.dev/last-adjustment-id"
@@ -316,6 +319,42 @@ def test_provider_credit_failure_keeps_the_sanitized_actionable_reason(
     result = harness.run(execution)
     assert result["state"] == "unavailable" and result["message"] == reason
     assert harness.calls == 1 and harness.writes == []
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        {"finish_reason": "length"},
+        {"finish_reason": "content_filter"},
+        {"empty_choices": True},
+    ],
+)
+def test_sdk_termination_returns_unavailable_evidence_without_writes(
+    execution, harness, monitoring, advisor, provider, outcome
+):
+    h = harness
+    provider[0].update(outcome)
+
+    def actual_advisor():
+        with prom_client(h.responses) as prom:
+            snapshot = validate_snapshot(
+                h.cluster.resource(), monitoring.observe(h.cluster, prom), h.clock.now()
+            )
+        return advisor.recommend(
+            snapshot,
+            candidates(snapshot),
+            key="test-only-placeholder",
+            model="gpt-4.1-mini",
+        )
+
+    h.before_decision = actual_advisor
+    result = h.run(execution)
+    assert result["state"] == "unavailable" and h.writes == []
+    assert h.calls == len(provider[1]) == 1
+    saved = json.loads(next(h.evidence.glob("*.json")).read_text())
+    assert saved[
+        "state"
+    ] == "unavailable" and "private-provider-detail" not in json.dumps(saved)
 
 
 def test_applied_patch_and_evidence_preserve_prior_settings(execution, harness):
