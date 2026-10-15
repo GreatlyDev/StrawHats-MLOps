@@ -183,7 +183,7 @@ export default function LocalIris({
           {status?.namespace ?? 'strawhats-operator-local'}
         </span>
         <small>
-          Target image: {status?.image ?? 'strawhats-iris:milestone-one'}
+          Target image: {status?.image ?? 'Awaiting verified status'}
         </small>
       </div>
       <div className="local-iris-actions">
