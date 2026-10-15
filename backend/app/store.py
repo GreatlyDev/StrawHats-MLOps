@@ -105,6 +105,40 @@ class Store:
                 db,
             )
 
+    def prediction_summary(self, model_id: str) -> dict:
+        with self.connect() as db:
+            db.execute("BEGIN")
+            predictions = db.execute(
+                "SELECT COUNT(*) FROM inferences WHERE model_id=?", (model_id,)
+            ).fetchone()[0]
+            label_counts = {
+                row["label"]: row["count"]
+                for row in db.execute(
+                    "SELECT label, COUNT(*) AS count FROM inferences "
+                    "WHERE model_id=? GROUP BY label ORDER BY label",
+                    (model_id,),
+                )
+            }
+            recent = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT model_id,label,latency_ms,created_at FROM inferences "
+                    "WHERE model_id=? ORDER BY id DESC LIMIT 30",
+                    (model_id,),
+                )
+            ]
+
+        recent.reverse()
+        return {
+            "model_id": model_id,
+            "predictions": predictions,
+            "label_counts": label_counts,
+            "median_latency_ms": median(row["latency_ms"] for row in recent)
+            if recent
+            else None,
+            "recent_inferences": recent,
+        }
+
     def event(self, kind: str, title: str, description: str, db=None):
         if db is not None:
             db.execute(
