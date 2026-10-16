@@ -22,7 +22,7 @@ class LocalCluster(IrisCluster):
 
 
 @contextmanager
-def connect_local_cluster(*, kubeconfig=None, zero_retries=False):
+def connect_local_cluster(*, kubeconfig=None, kubeconfig_data=None, zero_retries=False):
     # Disabled API instances do not need to import the optional Kubernetes SDK.
     try:
         from kubernetes import client, config
@@ -42,11 +42,24 @@ def connect_local_cluster(*, kubeconfig=None, zero_retries=False):
         configuration.retries = Retry(
             total=0 if zero_retries else 3, redirect=0, raise_on_redirect=False
         )
-        sdk = config.new_client_from_config(
+        if kubeconfig is not None and kubeconfig_data is not None:
+            raise ValueError("Select one Kubernetes configuration source.")
+        loader = (
+            config.new_client_from_config_dict
+            if kubeconfig_data is not None
+            else config.new_client_from_config
+        )
+        sdk = loader(
             context=CONTEXT,
             client_configuration=configuration,
             persist_config=False,
-            **({"config_file": kubeconfig} if kubeconfig is not None else {}),
+            **(
+                {"config_dict": kubeconfig_data}
+                if kubeconfig_data is not None
+                else {"config_file": kubeconfig}
+                if kubeconfig is not None
+                else {}
+            ),
         )
         address = urlsplit(sdk.configuration.host)
         if (

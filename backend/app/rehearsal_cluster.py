@@ -53,6 +53,19 @@ def _metadata(receipt):
     ca = base64.b64decode(clusters[0]["certificate-authority-data"], validate=True)
     if hashlib.sha256(ca).hexdigest() != receipt.ca_sha256:
         raise ValueError("The local CA differs from this rehearsal.")
+    return {
+        "apiVersion": "v1",
+        "kind": "Config",
+        "current-context": "docker-desktop",
+        "contexts": [
+            {
+                "name": "docker-desktop",
+                "context": {"cluster": "docker-desktop", "user": "docker-desktop"},
+            }
+        ],
+        "clusters": [{"name": "docker-desktop", "cluster": clusters[0]}],
+        "users": [{"name": "docker-desktop", "user": users[0]}],
+    }
 
 
 def _images(receipt):
@@ -79,11 +92,13 @@ def connect_rehearsal(receipt_path: Path, *, purpose="operate"):
         check_phase(receipt, purpose)
         if receipt.kind != "rehearsal":
             raise ValueError("Only local rehearsal receipts are supported.")
-        _metadata(receipt)
+        snapshot = _metadata(receipt)
         binding = receipt_binding(receipt)
         _images(receipt)
+        if _metadata(receipt) != snapshot:
+            raise ValueError("Local authentication changed during image checks.")
         with connect_local_cluster(
-            kubeconfig=receipt.kubeconfig, zero_retries=True
+            kubeconfig_data=snapshot, zero_retries=True
         ) as local:
             sdk = local.sdk
             if (
@@ -116,6 +131,8 @@ def connect_rehearsal(receipt_path: Path, *, purpose="operate"):
                 _images(current)
                 check_inventory(connection)
                 check_binding(connection, binding)
+                if _metadata(current) != snapshot:
+                    raise ValueError("Local authentication changed while connected.")
 
             connection.guard = guard
             connection.cluster = IrisCluster(

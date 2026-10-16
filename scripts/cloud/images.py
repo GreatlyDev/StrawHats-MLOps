@@ -77,7 +77,24 @@ def source_sha(cloud):
     return sha
 
 
-def _check(cloud, sha):
+def _binding(cloud, stack, outputs):
+    return (
+        cloud.args.profile,
+        cloud.args.account,
+        cloud.principal,
+        cloud.context,
+        stack["StackId"],
+        tuple(cloud.window),
+        tuple(
+            sorted(
+                (p["ParameterKey"], p["ParameterValue"]) for p in stack["Parameters"]
+            )
+        ),
+        tuple(sorted(outputs.items())),
+    )
+
+
+def _check(cloud, sha, binding):
     if source_sha(cloud) != sha:
         raise RuntimeError("Source changed during release; publication stopped.")
     if (
@@ -85,8 +102,12 @@ def _check(cloud, sha):
         != cloud.principal
     ):
         raise RuntimeError("Owner identity changed during release.")
-    cloud.stack()
+    stack, outputs = cloud.stack()
+    if _binding(cloud, stack, outputs) != binding:
+        raise RuntimeError("The original release approval or stack binding changed.")
     cloud.guard_window()
+    if source_sha(cloud) != sha:
+        raise RuntimeError("Source changed during release checks.")
 
 
 def inspect_local(image, run, *, operator=False):
@@ -137,7 +158,8 @@ def inspect_local(image, run, *, operator=False):
 
 
 def publish_runtime(cloud) -> ReleaseImages:
-    _, outputs = cloud.stack()
+    stack, outputs = cloud.stack()
+    binding = _binding(cloud, stack, outputs)
     registry = (
         f"{cloud.args.account}.dkr.ecr.us-east-1.amazonaws.com/strawhats-midterm/"
     )
@@ -164,7 +186,7 @@ def publish_runtime(cloud) -> ReleaseImages:
         ("model", "Dockerfile.model"),
         ("operator", "Dockerfile.operator"),
     ):
-        _check(cloud, sha)
+        _check(cloud, sha, binding)
         image = repositories[name] + ":" + sha
         cloud.run(
             [
@@ -183,13 +205,13 @@ def publish_runtime(cloud) -> ReleaseImages:
         if name == "model":
             deploy.verify_local_image(image, cloud.run)
         identities[name] = inspect_local(image, cloud.run, operator=name == "operator")
-        _check(cloud, sha)
+        _check(cloud, sha, binding)
     accepted = {}
     # TemporaryDirectory removes credentials even if publication or verification fails.
     with tempfile.TemporaryDirectory(prefix="docker-auth-", dir=LOCAL) as folder:
-        _check(cloud, sha)
+        _check(cloud, sha, binding)
         password = cloud.aws("ecr", "get-login-password", text=True)
-        _check(cloud, sha)
+        _check(cloud, sha, binding)
         cloud.run(
             [
                 "docker",
@@ -204,7 +226,7 @@ def publish_runtime(cloud) -> ReleaseImages:
             stdin=password,
         )
         for name, repository in repositories.items():
-            _check(cloud, sha)
+            _check(cloud, sha, binding)
             cloud.run(
                 ["docker", "--config", folder, "push", repository + ":" + sha],
                 timeout_seconds=900,
@@ -262,7 +284,7 @@ def publish_runtime(cloud) -> ReleaseImages:
             )
             progress[name] = asdict(accepted[name])
             save_record("publication-progress.json", progress)
-    _check(cloud, sha)
+    _check(cloud, sha, binding)
     result = ReleaseImages(
         sha, cloud.args.account, ci["run_id"], accepted["model"], accepted["operator"]
     )

@@ -15,7 +15,8 @@ import yaml
 from backend.app.iris_target import RuntimeTarget
 
 from . import deploy
-from .aws_commands import run_checked, validate_creation_window
+from .aws_commands import validate_creation_window
+from .cli import run as run_cli
 from .images import LOCAL, ReleaseImage, ReleaseImages, publish_runtime
 from .runtime_contract import RuntimeReceipt
 from .runtime_manifests import render_runtime
@@ -168,7 +169,7 @@ def parser():
     return result
 
 
-def main(argv=None, *, run=run_checked):
+def main(argv=None, *, run=None):
     args = parser().parse_args(argv)
     try:
         if args.command == "render":
@@ -184,6 +185,13 @@ def main(argv=None, *, run=run_checked):
                 encoding="utf-8",
             )
             return 0
+        if run is None:
+            from backend.app.eks_cluster import _validate_environment
+
+            def run(argv, **kwargs):
+                _validate_environment(args.profile)
+                return run_cli(argv, **kwargs)
+
         if args.command == "publish":
             result = asdict(publish_runtime(deploy.Cloud(args, run)))
         else:

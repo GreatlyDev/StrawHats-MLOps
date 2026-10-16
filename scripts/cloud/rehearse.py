@@ -25,6 +25,7 @@ from scripts.monitoring.observations import observe
 from scripts.optimization.execution import save_evidence
 
 from .aws_commands import run_checked
+from .cli import run as run_cli
 from .deploy import resolve_runtime_digests
 from .images import inspect_local, source_sha
 from .runtime_contract import LocalImages, RuntimeReceipt
@@ -36,14 +37,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def run(argv, **kwargs):
-    executable = (
-        (shutil.which("docker.exe") if argv[0] == "docker" else None)
-        or shutil.which(argv[0])
-        or shutil.which(argv[0] + ".exe")
-    )
-    if not executable:
-        raise RuntimeError("A required local executable is missing.")
-    return run_checked([executable, *argv[1:]], **kwargs)
+    return run_cli(argv, runner=run_checked, **kwargs)
 
 
 def import_images(node, images):

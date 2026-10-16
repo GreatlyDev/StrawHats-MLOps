@@ -31,10 +31,33 @@ def _matches(actual, desired):
 
 def _configuration_matches(actual, desired):
     return all(
+        _matches(actual.get("metadata", {}).get(field, {}), expected)
+        for field, expected in desired.get("metadata", {}).items()
+        if field in ("labels", "annotations")
+    ) and all(
         _matches(actual.get(k), v)
         for k, v in desired.items()
         if k not in ("apiVersion", "kind", "metadata")
     )
+
+
+def _recorded_configuration_matches(actual, desired):
+    if desired["kind"] == "ModelDeployment":
+        from backend.model_operator.spec import choose_target, parse_target
+
+        try:
+            for target in (parse_target(actual["spec"]), choose_target(actual)):
+                if (
+                    target.image != desired["spec"]["image"]
+                    or target.image_pull_policy != desired["spec"]["imagePullPolicy"]
+                ):
+                    return False
+        except (ValueError, KeyError, TypeError):
+            return False
+        desired = deepcopy(desired)
+        for field in ("replicas", "cpuMillicores", "memoryMi", "mode"):
+            desired["spec"].pop(field, None)
+    return _configuration_matches(actual, desired)
 
 
 def _record(doc, actual, ownership):
@@ -78,6 +101,8 @@ def _validate_existing(connection, doc, actual, records, shared):
             raise RuntimeError(
                 "Installed source configuration differs from this receipt."
             )
+        if not _recorded_configuration_matches(actual, doc):
+            raise RuntimeError("Recorded runtime configuration drift detected.")
         return record.ownership
     if actual:
         if identity in shared and _configuration_matches(actual, doc):
@@ -350,6 +375,19 @@ def _check_children(connection, receipt):
                 raise RuntimeError("A foreign namespace child blocks cleanup.")
 
 
+def _check_crd_instances(connection, receipt):
+    allowed = {r.uid for r in receipt.inventory if r.kind == "ModelDeployment"}
+    for record in receipt.inventory:
+        if record.kind != "CustomResourceDefinition" or record.ownership != "created":
+            continue
+        crd = connection.kube.get(record.document())
+        if crd is not None and any(
+            d.get("metadata", {}).get("uid") not in allowed
+            for d in connection.kube.instances(crd)
+        ):
+            raise RuntimeError("A foreign custom resource blocks CRD cleanup.")
+
+
 def remove_runtime(connection, receipt):
     if (
         connection.purpose != "cleanup"
@@ -359,13 +397,19 @@ def remove_runtime(connection, receipt):
         raise RuntimeError("A matching cleanup-purpose connection is required.")
     _check_inventory(connection, receipt)
     _check_children(connection, receipt)
+    _check_crd_instances(connection, receipt)
     for record in reversed(receipt.inventory):
         if record.ownership == "borrowed":
             continue
         connection.check_mutation()
-        if record.kind == "Namespace":
-            _check_children(connection, receipt)
-        connection.kube.delete(record)
+
+        def before_delete():
+            if record.kind == "Namespace":
+                _check_children(connection, receipt)
+            if record.kind == "CustomResourceDefinition":
+                _check_crd_instances(connection, receipt)
+
+        connection.kube.delete(record, before_delete=before_delete)
     persist(connection, replace(receipt, phase="removed"))
     return {"removed": True, "kind": receipt.kind, "release_id": receipt.release_id}
 
@@ -462,7 +506,7 @@ class RuntimeObjects:
             time.sleep(1)
         raise RuntimeError("The new CRD did not become Established.")
 
-    def delete(self, record):
+    def delete(self, record, *, before_delete=lambda: None):
         doc = record.document()
         current = self.get(doc)
         if current is None:
@@ -471,6 +515,7 @@ class RuntimeObjects:
             raise RuntimeError("Deletion UID changed.")
         resource = self._resource(doc)
         self.before_mutation()
+        before_delete()
         resource.delete(
             name=record.name,
             namespace=record.namespace or None,
@@ -550,6 +595,14 @@ class RuntimeObjects:
                 else:
                     memory -= float(value) / 2**20
         return cpu, memory
+
+    def instances(self, crd):
+        spec = crd["spec"]
+        version = next(v["name"] for v in spec["versions"] if v["served"])
+        resource = self.dynamic.resources.get(
+            api_version=f"{spec['group']}/{version}", kind=spec["names"]["kind"]
+        )
+        return resource.get(_request_timeout=5).to_dict().get("items", [])
 
     def children(self, namespace):
         children = []

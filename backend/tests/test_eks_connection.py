@@ -419,6 +419,60 @@ def test_owner_change_after_token_wait_stops_next_write(eks, release):
     assert release.writes == []
 
 
+def test_kubeconfig_changed_during_token_wait_rejects_next_write(eks, release):
+    from pathlib import Path
+
+    with open_connection(eks, release) as connection:
+
+        def tamper():
+            config = deepcopy(release.config)
+            config["users"][0]["user"]["exec"]["command"] = "unexpected-helper"
+            Path(release.receipt.kubeconfig).write_text(yaml.safe_dump(config))
+
+        release.after_token = tamper
+        with pytest.raises(HTTPException):
+            connection.check_mutation()
+    assert not release.writes
+
+
+def test_forwards_receive_owned_transport_snapshot_without_exec_plugin(
+    eks, release, monkeypatch
+):
+    from pathlib import Path
+
+    from scripts.cloud import runtime_forwards as forwards
+
+    paths = []
+
+    class Process:
+        returncode = None
+
+        def __init__(self, argv, **kwargs):
+            path = Path(argv[argv.index("--kubeconfig") + 1])
+            assert path != Path(release.receipt.kubeconfig)
+            config = yaml.safe_load(path.read_text())
+            assert config["users"][0]["user"] == {"token": TOKEN}
+            paths.append(path)
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, **kwargs):
+            return self.returncode
+
+    monkeypatch.setattr(forwards, "require_free_port", lambda p: None)
+    monkeypatch.setattr(forwards, "wait_ready", lambda *args: None)
+    monkeypatch.setattr(forwards.shutil, "which", lambda name: name)
+    monkeypatch.setattr(forwards.subprocess, "Popen", Process)
+    with open_connection(eks, release) as connection:
+        with forwards.managed_forwards(connection):
+            assert len(paths) == 2 and all(p.exists() for p in paths)
+    assert all(not p.exists() for p in paths)
+
+
 @pytest.mark.parametrize("purpose", ["operate", "cleanup"])
 def test_cleanup_remains_available_after_window_expiry(eks, release, purpose):
     expired = replace(
@@ -456,7 +510,9 @@ def test_another_release_cannot_replace_the_open_binding(eks, release):
     assert release.writes == []
 
 
-@pytest.mark.parametrize("fault", [None, "image", "uid", "exec", "endpoint"])
+@pytest.mark.parametrize(
+    "fault", [None, "image", "uid", "exec", "endpoint", "during_wait"]
+)
 def test_local_rehearsal_has_its_own_verified_binding(
     runtime, local_release, monkeypatch, tmp_path, fault
 ):
@@ -521,7 +577,7 @@ def test_local_rehearsal_has_its_own_verified_binding(
     @contextmanager
     def connect(**kwargs):
         assert (
-            kwargs["kubeconfig"] == receipt.kubeconfig
+            kwargs["kubeconfig_data"]["users"][0]["user"] == config["users"][0]["user"]
             and kwargs["zero_retries"] is True
         )
         yield SimpleNamespace(sdk=sdk, custom=None, apps=None)
@@ -535,6 +591,10 @@ def test_local_rehearsal_has_its_own_verified_binding(
         assert "aws" not in argv[0]
         operator = "operator:" in argv[-1]
         identity = "3" if fault == "image" else "2" if operator else "1"
+        if fault == "during_wait":
+            changed = deepcopy(config)
+            changed["users"][0]["user"] = {"exec": {"command": "unexpected-helper"}}
+            Path(receipt.kubeconfig).write_text(yaml.safe_dump(changed))
         return json.dumps(
             [{"Os": "linux", "Architecture": "amd64", "Id": "sha256:" + identity * 64}]
         )

@@ -278,8 +278,8 @@ def test_cleanup_recognizes_only_legacy_endpoints_for_owned_service_pods(
     connection.kube.foreign_children = [pod, endpoints]
     delete = connection.kube.delete
 
-    def delete_with_service_gc(record):
-        delete(record)
+    def delete_with_service_gc(record, **kwargs):
+        delete(record, **kwargs)
         if record.kind == "Service":
             connection.kube.foreign_children = [
                 d
@@ -347,6 +347,12 @@ def test_only_owned_forwards_are_stopped_and_crashes_reject_reads(
     monkeypatch.setattr(forwards, "require_free_port", lambda p: None)
     monkeypatch.setattr(forwards, "wait_ready", lambda *a: None)
     monkeypatch.setattr(forwards.shutil, "which", lambda n: n)
+
+    @contextmanager
+    def snapshot(*args):
+        yield "local-config"
+
+    monkeypatch.setattr(forwards, "owned_kubeconfig", snapshot)
     processes = []
 
     class Process:

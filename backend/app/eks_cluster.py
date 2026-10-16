@@ -4,7 +4,6 @@ import base64
 import hashlib
 import os
 import re
-import shutil
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -18,6 +17,7 @@ from kubernetes import client
 from urllib3.util.retry import Retry
 
 from scripts.cloud.aws_commands import run_checked, validate_creation_window
+from scripts.cloud.cli import executable
 from scripts.cloud.deploy import Cloud
 from scripts.cloud.runtime_contract import RuntimeReceipt
 from scripts.cloud.runtime_install import RuntimeObjects
@@ -36,10 +36,7 @@ _run = run_checked
 
 
 def _aws_cli():
-    executable = shutil.which("aws") or shutil.which("aws.exe")
-    if not executable:
-        raise RuntimeError("AWS CLI v2 must be available to this owner runtime.")
-    return executable
+    return executable("aws")
 
 
 def _validate_environment(profile):
@@ -276,6 +273,7 @@ def connect_eks(
                 # Credential helpers and slow reads all finish before the last check.
                 _verify_cloud(current, profile, expected_account, purpose)
                 check_binding(connection, binding)
+                kube_metadata(current)
                 if datetime.now(timezone.utc) + timedelta(seconds=10) >= expires:
                     raise ValueError("Token expired during binding checks.")
                 _window(current, purpose)
@@ -292,6 +290,7 @@ def connect_eks(
             check_binding(connection, binding)
             # Token acquisition may have waited or changed the active profile.
             _verify_cloud(receipt, profile, expected_account, purpose)
+            kube_metadata(receipt)
             if datetime.now(timezone.utc) + timedelta(seconds=10) >= token_end:
                 raise ValueError("Token expired during initial binding checks.")
             _window(receipt, purpose)

@@ -1,12 +1,18 @@
 """Own two loopback kubectl children; never reuse an occupied listener."""
 
-import re
+import base64
+import hashlib
 import shutil
 import socket
 import subprocess
 import tempfile
 import time
 from contextlib import ExitStack, contextmanager
+from pathlib import Path
+
+import yaml
+
+from .cli import cli_path  # noqa: F401
 
 
 def require_free_port(port):
@@ -55,16 +61,56 @@ class ForwardSession:
                     process.wait(timeout=5)
 
 
-def cli_path(path, executable):
-    value = str(path)
-    if executable.endswith(".exe") and value.startswith("/"):
-        match = re.fullmatch(r"/mnt/([a-z])/(.+)", value)
-        if not match:
-            raise ValueError(
-                "The Windows CLI requires a path on a mounted Windows drive."
-            )
-        return match[1].upper() + ":/" + match[2]
-    return value
+@contextmanager
+def owned_kubeconfig(connection, executable):
+    """Pass only validated SDK material to kubectl; never reopen user plugins."""
+    settings = connection.cluster.sdk.configuration
+    receipt = connection.receipt
+    ca = Path(settings.ssl_ca_cert).read_bytes()
+    if (
+        settings.host != receipt.endpoint
+        or not settings.verify_ssl
+        or settings.proxy
+        or hashlib.sha256(ca).hexdigest() != receipt.ca_sha256
+    ):
+        raise ValueError("Forward transport differs from the verified SDK.")
+    if receipt.kind == "eks":
+        user = {"token": settings.api_key["authorization"]}
+    else:
+        user = {
+            "client-certificate-data": base64.b64encode(
+                Path(settings.cert_file).read_bytes()
+            ).decode(),
+            "client-key-data": base64.b64encode(
+                Path(settings.key_file).read_bytes()
+            ).decode(),
+        }
+    context = connection.target.context
+    config = {
+        "apiVersion": "v1",
+        "kind": "Config",
+        "current-context": context,
+        "contexts": [
+            {"name": context, "context": {"cluster": context, "user": context}}
+        ],
+        "clusters": [
+            {
+                "name": context,
+                "cluster": {
+                    "server": settings.host,
+                    "certificate-authority-data": base64.b64encode(ca).decode(),
+                },
+            }
+        ],
+        "users": [{"name": context, "user": user}],
+    }
+    with tempfile.TemporaryDirectory(
+        prefix="owned-forward-", dir=connection.receipt_path.parent
+    ) as folder:
+        path = Path(folder) / "kubeconfig"
+        path.touch(mode=0o600)
+        path.write_text(yaml.safe_dump(config), encoding="utf-8")
+        yield cli_path(path, executable)
 
 
 @contextmanager
@@ -85,12 +131,15 @@ def managed_forwards(connection):
             for name, port in (("prometheus", 9090), ("grafana", 3000)):
                 output = stack.enter_context(tempfile.TemporaryFile())
                 connection.check_mutation()
+                kubeconfig = stack.enter_context(
+                    owned_kubeconfig(connection, executable)
+                )
                 argv = [
                     executable,
                     "--context",
                     connection.target.context,
                     "--kubeconfig",
-                    cli_path(connection.receipt.kubeconfig, executable),
+                    kubeconfig,
                     "-n",
                     connection.target.monitoring_namespace,
                     "port-forward",

@@ -2,6 +2,7 @@
 
 import importlib
 import json
+from copy import deepcopy
 from dataclasses import asdict
 from types import SimpleNamespace
 
@@ -34,6 +35,7 @@ def release(images, monkeypatch, tmp_path):
         index_identity=False,
     )
     repository = f"{ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/strawhats-midterm/"
+    stack_payload = stack_output()
 
     def run(argv, **kwargs):
         state.calls.append(argv)
@@ -42,7 +44,9 @@ def release(images, monkeypatch, tmp_path):
         if argv[:3] == ["aws", "sts", "get-caller-identity"]:
             return json.dumps(IDENTITY)
         if argv[:3] == ["aws", "cloudformation", "describe-stacks"]:
-            stack = stack_output(expired=state.expired)
+            stack = (
+                stack_output(expired=True) if state.expired else deepcopy(stack_payload)
+            )
             stack["Stacks"][0]["Outputs"] += [
                 {
                     "OutputKey": "OperatorRepositoryUri",
@@ -175,6 +179,52 @@ def test_failed_ci_never_builds_or_publishes(images, release):
     with pytest.raises(RuntimeError):
         images.publish_runtime(cloud)
     assert state.build_count == 0 and state.pushes == []
+
+
+@pytest.mark.parametrize("fault", ["budget", "end", "stack", "source_during_stack"])
+def test_publication_rejects_changed_binding_after_slow_checks(images, release, fault):
+    from datetime import datetime, timedelta
+
+    state, cloud, _ = release
+    run = cloud.run
+
+    def changed(argv, **kwargs):
+        result = run(argv, **kwargs)
+        if argv[:3] == ["aws", "ecr", "get-login-password"]:
+            state.password_issued = True
+        if state.build_count and argv[:3] == [
+            "aws",
+            "cloudformation",
+            "describe-stacks",
+        ]:
+            payload = json.loads(result)
+            stack = payload["Stacks"][0]
+            if fault == "stack":
+                stack["StackId"] += "-replacement"
+            elif fault == "source_during_stack":
+                state.changed = getattr(state, "password_issued", False)
+            else:
+                tag = next(
+                    t
+                    for t in stack["Tags"]
+                    if t["Key"]
+                    == ("BudgetUsd" if fault == "budget" else "RuntimeEndAt")
+                )
+                tag["Value"] = (
+                    "24"
+                    if fault == "budget"
+                    else (
+                        datetime.fromisoformat(tag["Value"]) + timedelta(hours=1)
+                    ).isoformat()
+                )
+            return json.dumps(payload)
+        return result
+
+    cloud.run = changed
+    with pytest.raises(RuntimeError):
+        images.publish_runtime(cloud)
+    assert not state.pushes
+    assert not any("login" in argv for argv in state.calls)
 
 
 @pytest.mark.parametrize("foreign", [False, True])

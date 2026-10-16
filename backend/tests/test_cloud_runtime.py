@@ -79,7 +79,8 @@ def connection(runtime, rehearsal, tmp_path):
                 self.data[key(doc)] = result
             return result
 
-        def delete(self, record):
+        def delete(self, record, *, before_delete=lambda: None):
+            before_delete()
             doc = record.document()
             current = self.data.get(key(doc))
             if current and current["metadata"]["uid"] != record.uid:
@@ -89,6 +90,9 @@ def connection(runtime, rehearsal, tmp_path):
 
         def available_capacity(self):
             return self.free
+
+        def instances(self, crd):
+            return [d for d in self.data.values() if d["kind"] == "ModelDeployment"]
 
         def children(self, namespace):
             return [
@@ -513,3 +517,78 @@ def test_delete_rechecks_guard_after_its_uid_read(runtime):
     with pytest.raises(ValueError):
         objects.delete(record)
     assert calls == []
+
+
+@pytest.mark.parametrize("late", [False, True])
+def test_created_crd_cleanup_preserves_foreign_instances_cluster_wide(
+    runtime, connection, tmp_path, late
+):
+    runtime.install.install_runtime(
+        connection,
+        runtime.manifests.render_runtime(connection.target),
+        evidence_dir=tmp_path,
+    )
+    foreign = {
+        "apiVersion": "mlops.strawhats.dev/v1alpha1",
+        "kind": "ModelDeployment",
+        "metadata": {"namespace": "other-team", "name": "model", "uid": "foreign"},
+    }
+    if not late:
+        connection.kube.data[key(foreign)] = foreign
+    else:
+        delete = connection.kube.delete
+
+        def raced(record, **kwargs):
+            if record.kind == "CustomResourceDefinition":
+                connection.kube.data[key(foreign)] = foreign
+            delete(record, **kwargs)
+
+        connection.kube.delete = raced
+    connection.purpose = "cleanup"
+    with pytest.raises(RuntimeError, match="foreign custom resource"):
+        runtime.install.remove_runtime(connection, connection.receipt)
+    assert connection.kube.get(foreign) == foreign
+    assert not any(
+        r.kind == "CustomResourceDefinition" for r in connection.kube.deleted
+    )
+    if not late:
+        assert not connection.kube.deleted
+
+
+@pytest.mark.parametrize("kind", ["Deployment", "CustomResourceDefinition"])
+def test_resume_rejects_live_configuration_drift_under_same_uid(
+    runtime, connection, tmp_path, kind
+):
+    bundle = runtime.manifests.render_runtime(connection.target)
+    runtime.install.install_runtime(connection, bundle, evidence_dir=tmp_path)
+    doc = next(d for d in connection.kube.data.values() if d["kind"] == kind)
+    if kind == "Deployment":
+        doc["spec"]["template"]["spec"]["containers"][0]["image"] = "foreign:latest"
+    else:
+        doc["spec"]["versions"][0]["served"] = False
+    count = len(connection.kube.writes)
+    with pytest.raises(RuntimeError, match="configuration drift"):
+        runtime.install.install_runtime(connection, bundle, evidence_dir=tmp_path)
+    assert len(connection.kube.writes) == count
+
+
+@pytest.mark.parametrize("bounded", [True, False])
+def test_resume_preserves_only_bounded_release_model_lifecycle(
+    runtime, connection, tmp_path, bounded
+):
+    bundle = runtime.manifests.render_runtime(connection.target)
+    runtime.install.install_runtime(connection, bundle, evidence_dir=tmp_path)
+    model = next(
+        d for d in connection.kube.data.values() if d["kind"] == "ModelDeployment"
+    )
+    model["spec"].update(
+        replicas=2, cpuMillicores=500 if bounded else 501, memoryMi=512, mode="Rollback"
+    )
+    model["status"] = {"lastReadySpec": deepcopy(model["spec"])}
+    before = deepcopy(model)
+    if bounded:
+        runtime.install.install_runtime(connection, bundle, evidence_dir=tmp_path)
+        assert model == before
+    else:
+        with pytest.raises(RuntimeError, match="configuration drift"):
+            runtime.install.install_runtime(connection, bundle, evidence_dir=tmp_path)
