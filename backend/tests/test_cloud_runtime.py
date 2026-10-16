@@ -592,3 +592,28 @@ def test_resume_preserves_only_bounded_release_model_lifecycle(
     else:
         with pytest.raises(RuntimeError, match="configuration drift"):
             runtime.install.install_runtime(connection, bundle, evidence_dir=tmp_path)
+
+
+def test_borrowed_crd_keeps_original_labels_and_rejects_later_schema_drift(
+    runtime, connection, tmp_path
+):
+    import yaml
+
+    crd = yaml.safe_load((runtime.manifests.BASE / "operator/crd.yaml").read_text())
+    crd["metadata"]["uid"] = "borrowed-original"
+    connection.kube.data[key(crd)] = deepcopy(crd)
+    bundle = runtime.manifests.render_runtime(connection.target)
+    runtime.install.install_runtime(connection, bundle, evidence_dir=tmp_path)
+    assert connection.kube.get(crd) == crd
+    assert (
+        next(
+            r
+            for r in connection.receipt.inventory
+            if r.kind == "CustomResourceDefinition"
+        ).ownership
+        == "borrowed"
+    )
+    runtime.install.install_runtime(connection, bundle, evidence_dir=tmp_path)
+    connection.kube.data[key(crd)]["spec"]["versions"][0]["served"] = False
+    with pytest.raises(RuntimeError, match="configuration drift"):
+        runtime.install.install_runtime(connection, bundle, evidence_dir=tmp_path)

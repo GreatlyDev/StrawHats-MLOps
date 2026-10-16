@@ -41,7 +41,17 @@ def _configuration_matches(actual, desired):
     )
 
 
-def _recorded_configuration_matches(actual, desired):
+def _shared_configuration(desired):
+    desired = deepcopy(desired)
+    labels = desired.get("metadata", {}).get("labels", {})
+    for field in ("app.kubernetes.io/managed-by", "mlops.strawhats.dev/runtime-kind"):
+        labels.pop(field, None)
+    return desired
+
+
+def _recorded_configuration_matches(actual, desired, *, borrowed=False):
+    if borrowed:
+        desired = _shared_configuration(desired)
     if desired["kind"] == "ModelDeployment":
         from backend.model_operator.spec import choose_target, parse_target
 
@@ -101,11 +111,15 @@ def _validate_existing(connection, doc, actual, records, shared):
             raise RuntimeError(
                 "Installed source configuration differs from this receipt."
             )
-        if not _recorded_configuration_matches(actual, doc):
+        if not _recorded_configuration_matches(
+            actual, doc, borrowed=record.ownership == "borrowed"
+        ):
             raise RuntimeError("Recorded runtime configuration drift detected.")
         return record.ownership
     if actual:
-        if identity in shared and _configuration_matches(actual, doc):
+        if identity in shared and _configuration_matches(
+            actual, _shared_configuration(doc)
+        ):
             if doc["kind"] == "Deployment" and not deployment_ready(actual):
                 raise RuntimeError("Existing shared addon is not ready.")
             return "borrowed"
