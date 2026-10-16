@@ -476,3 +476,36 @@ def test_rehearsal_receipt_rejects_an_image_from_another_source(connection):
             source_sha="b" * 40,
             images=replace(connection.receipt.images, source_sha="b" * 40),
         )
+
+
+def test_delete_rechecks_guard_after_its_uid_read(runtime):
+    from kubernetes.client.exceptions import ApiException
+
+    record = runtime.contract.ObjectRecord(
+        "v1", "ConfigMap", "strawhats", "config", "captured", "created", "a" * 64
+    )
+    calls = []
+
+    class Resource:
+        deleted = False
+
+        def get(self, **kwargs):
+            if self.deleted:
+                raise ApiException(404)
+            return SimpleNamespace(to_dict=lambda: {"metadata": {"uid": "captured"}})
+
+        def delete(self, **kwargs):
+            self.deleted = True
+            calls.append(kwargs)
+
+    objects = object.__new__(runtime.install.RuntimeObjects)
+    resource = Resource()
+    objects._resource = lambda doc: resource
+
+    def guard():
+        raise ValueError("Window expired during the UID read")
+
+    objects.before_mutation = guard
+    with pytest.raises(ValueError):
+        objects.delete(record)
+    assert calls == []

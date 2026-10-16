@@ -22,7 +22,7 @@ class LocalCluster(IrisCluster):
 
 
 @contextmanager
-def connect_local_cluster():
+def connect_local_cluster(*, kubeconfig=None, zero_retries=False):
     # Disabled API instances do not need to import the optional Kubernetes SDK.
     try:
         from kubernetes import client, config
@@ -39,11 +39,14 @@ def connect_local_cluster():
         configuration = client.Configuration()
         configuration.proxy = None  # Local cluster traffic must never use a proxy.
         # Refuse redirects before any connection pools cache a retry policy.
-        configuration.retries = Retry(total=3, redirect=0, raise_on_redirect=False)
+        configuration.retries = Retry(
+            total=0 if zero_retries else 3, redirect=0, raise_on_redirect=False
+        )
         sdk = config.new_client_from_config(
             context=CONTEXT,
             client_configuration=configuration,
             persist_config=False,
+            **({"config_file": kubeconfig} if kubeconfig is not None else {}),
         )
         address = urlsplit(sdk.configuration.host)
         if (

@@ -329,8 +329,9 @@ def verify_runtime(connection, receipt, *, monotonic=time.monotonic, wait=time.s
 class RuntimeObjects:
     """Bounded SDK CRUD; every deletion includes its captured UID precondition."""
 
-    def __init__(self, sdk):
+    def __init__(self, sdk, *, before_mutation=lambda: None):
         self.sdk, self.dynamic = sdk, dynamic.DynamicClient(sdk)
+        self.before_mutation = before_mutation
 
     def _resource(self, doc):
         return self.dynamic.resources.get(
@@ -352,16 +353,15 @@ class RuntimeObjects:
             raise
 
     def create(self, doc, *, dry_run=False):
-        return (
-            self._resource(doc)
-            .create(
-                body=doc,
-                namespace=doc["metadata"].get("namespace"),
-                dry_run="All" if dry_run else None,
-                _request_timeout=5,
-            )
-            .to_dict()
-        )
+        resource = self._resource(doc)
+        if not dry_run:
+            self.before_mutation()
+        return resource.create(
+            body=doc,
+            namespace=doc["metadata"].get("namespace"),
+            dry_run="All" if dry_run else None,
+            _request_timeout=5,
+        ).to_dict()
 
     def wait_crd(self, doc):
         deadline = time.monotonic() + 60
@@ -383,7 +383,9 @@ class RuntimeObjects:
             return
         if current["metadata"].get("uid") != record.uid:
             raise RuntimeError("Deletion UID changed.")
-        self._resource(doc).delete(
+        resource = self._resource(doc)
+        self.before_mutation()
+        resource.delete(
             name=record.name,
             namespace=record.namespace or None,
             body={
