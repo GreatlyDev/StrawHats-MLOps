@@ -87,7 +87,7 @@ def _identity(current, accepted):
             and current["spec"] == accepted["spec"]
             and all(
                 current["metadata"].get("annotations", {}).get(key)
-                == accepted["metadata"]["annotations"][key]
+                == accepted["metadata"].get("annotations", {}).get(key)
                 for key in (STAMP, RUN)
             )
         )
@@ -125,7 +125,7 @@ def _expected(source, target, annotations):
     return result
 
 
-def _verify(cluster, accepted, *, monotonic, wait, runtime):
+def verify_revision(cluster, accepted, *, monotonic, wait, runtime):
     deadline = monotonic() + 180
 
     def timeout():
@@ -400,7 +400,7 @@ def run_adjustment(
             "Kubernetes did not confirm the exact proposed revision; no restoration attempted.",
         )
     try:
-        result["readiness"] = _verify(
+        result["readiness"] = verify_revision(
             cluster, accepted, monotonic=monotonic, wait=wait, runtime=target
         )
         return finish(
@@ -432,7 +432,7 @@ def run_adjustment(
         restored = _patch(cluster, current, prior, annotations, runtime=target)
         if not _identity(restored, expected_restore):
             raise Superseded
-        result["recovery"] = _verify(
+        result["recovery"] = verify_revision(
             cluster, restored, monotonic=monotonic, wait=wait, runtime=target
         )
         return finish(

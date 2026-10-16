@@ -630,6 +630,26 @@ def apply(cloud):
         "--image-ids",
         "imageDigest=" + image.split("@")[1],
     )
+    current = json.loads(
+        cloud.kubectl(
+            "get",
+            "deployment",
+            "iris",
+            "-n",
+            "strawhats",
+            "--ignore-not-found",
+            "-o",
+            "json",
+        )
+        or "{}"
+    )
+    if any(
+        owner.get("kind") == "ModelDeployment" and owner.get("controller") is True
+        for owner in current.get("metadata", {}).get("ownerReferences", [])
+    ):
+        raise RuntimeError(
+            "The operator owns Iris; use the owner runtime release instead of legacy apply."
+        )
     overlay = LOCAL / "iris-overlay"
     overlay.mkdir(parents=True, exist_ok=True)
     (overlay / "kustomization.yaml").write_text(

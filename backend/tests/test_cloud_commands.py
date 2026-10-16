@@ -238,6 +238,8 @@ def test_failed_apply_never_awaits_or_claims_rollout(tmp_path):
                 "--context",
                 f"arn:aws:eks:us-east-1:{ACCOUNT}:cluster/strawhats-midterm",
             ]
+            if argv[3] == "get":
+                return "{}"
             assert argv[3] == "apply"
             raise RuntimeError("Apply failed")
         pytest.fail("Unexpected command")
