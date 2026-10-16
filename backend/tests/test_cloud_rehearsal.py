@@ -1,6 +1,7 @@
 """Local rehearsal retains precise ownership and never borrows an existing port."""
 
 import importlib
+import json
 from contextlib import contextmanager
 from copy import deepcopy
 from types import SimpleNamespace
@@ -159,6 +160,42 @@ def test_windows_kubectl_receives_its_native_path(forwards):
     )
     with pytest.raises(ValueError):
         forwards.cli_path("/tmp/config", "/mnt/c/bin/kubectl.exe")
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_imported_oci_index_is_bound_to_the_runtime_config(
+    command, monkeypatch, foreign
+):
+    index, manifest, config = ("sha256:" + c * 64 for c in ("a", "b", "c"))
+
+    def run(argv, **kwargs):
+        if "ls" in argv:
+            return "REF TYPE DIGEST\ndocker.io/library/image:tag index " + index + "\n"
+        if "content" in argv:
+            return json.dumps(
+                {
+                    "manifests": [
+                        {
+                            "platform": {"os": "linux", "architecture": "amd64"},
+                            "digest": manifest,
+                        }
+                    ]
+                }
+                if argv[-1] == index
+                else {"config": {"digest": config}}
+            )
+        if "inspecti" in argv:
+            return json.dumps({"status": {"id": config}})
+        pytest.fail("Unexpected import check")
+
+    monkeypatch.setattr(command, "run", run)
+    if foreign:
+        with pytest.raises(RuntimeError):
+            command.verify_imported(
+                "desktop-control-plane", "image:tag", "sha256:" + "d" * 64
+            )
+    else:
+        command.verify_imported("desktop-control-plane", "image:tag", index)
 
 
 @pytest.mark.parametrize("crashed", [False, True])

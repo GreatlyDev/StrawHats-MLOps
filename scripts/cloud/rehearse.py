@@ -25,6 +25,7 @@ from scripts.monitoring.observations import observe
 from scripts.optimization.execution import save_evidence
 
 from .aws_commands import run_checked
+from .deploy import resolve_runtime_digests
 from .images import inspect_local, source_sha
 from .runtime_contract import LocalImages, RuntimeReceipt
 from .runtime_forwards import managed_forwards
@@ -95,13 +96,54 @@ def import_images(node, images):
         (images.model_reference, images.model_image_id),
         (images.operator_reference, images.operator_image_id),
     ):
-        actual = json.loads(
-            run(["docker", "exec", node, "crictl", "inspecti", reference])
+        verify_imported(node, reference, identity)
+
+
+def verify_imported(node, reference, identity):
+    qualified = (
+        reference
+        if reference.startswith("docker.io/")
+        else "docker.io/library/" + reference
+    )
+    table = run(
+        [
+            "docker",
+            "exec",
+            node,
+            "ctr",
+            "-n",
+            "k8s.io",
+            "images",
+            "ls",
+            "name==" + qualified,
+        ]
+    ).splitlines()
+    rows = [line.split() for line in table[1:] if line.strip()]
+    if len(rows) != 1 or rows[0][0] != qualified or len(rows[0]) < 3:
+        raise RuntimeError("Imported node tag is missing or ambiguous.")
+    digest = rows[0][2]
+    manifest, config = resolve_runtime_digests(
+        reference,
+        digest,
+        lambda ref: run(
+            [
+                "docker",
+                "exec",
+                node,
+                "ctr",
+                "-n",
+                "k8s.io",
+                "content",
+                "get",
+                ref.rsplit("@", 1)[1],
+            ]
+        ),
+    )
+    actual = json.loads(run(["docker", "exec", node, "crictl", "inspecti", reference]))
+    if identity not in (digest, manifest, config) or actual["status"]["id"] != config:
+        raise RuntimeError(
+            "Imported node image differs from its verified Docker content."
         )
-        if actual["status"]["id"] != identity:
-            raise RuntimeError(
-                "Imported node image differs from its actual Docker image ID."
-            )
 
 
 def prepare(path, kubeconfig):

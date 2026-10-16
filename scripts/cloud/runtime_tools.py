@@ -75,14 +75,19 @@ def command_main(operation, argv=None):
                 result = asdict(observation)
                 success = observation.available
             elif operation == "traffic":
-                result = run_demo(
-                    connection.cluster,
-                    prometheus,
-                    clock=time.monotonic,
-                    sleep=time.sleep,
-                    target=connection.target,
-                )
-                success = result["complete"]
+                # Capture partial work before the connection boundary sanitizes
+                # exceptions; a failed demo must retain its actual request count.
+                try:
+                    result = run_demo(
+                        connection.cluster,
+                        prometheus,
+                        clock=time.monotonic,
+                        sleep=time.sleep,
+                        target=connection.target,
+                    )
+                    success = result["complete"]
+                except MonitoringError as error:
+                    result = {"complete": False, **getattr(error, "evidence", {})}
             else:
                 result = run_adjustment(
                     connection.cluster,

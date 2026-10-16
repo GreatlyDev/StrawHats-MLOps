@@ -181,6 +181,38 @@ def test_copied_receipt_rejected_before_connection(tools, runtime, monkeypatch):
     assert tools.command_main("observe", args(runtime)) == 1
 
 
+def test_incomplete_traffic_evidence_survives_connection_sanitization(
+    tools, runtime, monkeypatch, tmp_path
+):
+    import json
+
+    monkeypatch.setattr(tools, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        tools.RuntimeReceipt, "load", lambda p: SimpleNamespace(kind=runtime.kind)
+    )
+
+    @contextmanager
+    def connect(*a, **k):
+        try:
+            yield SimpleNamespace(cluster=object(), target=runtime)
+        except Exception:
+            raise HTTPException(503, "Sanitized connection failure") from None
+
+    monkeypatch.setattr(tools, "owner_connection", connect)
+
+    def interrupted(*a, **k):
+        error = tools.MonitoringError("Controlled interruption")
+        error.evidence = {"complete": False, "successful_requests": 17}
+        raise error
+
+    monkeypatch.setattr(tools, "run_demo", interrupted)
+    assert tools.command_main("traffic", args(runtime) + ["--run-demo"]) == 1
+    saved = json.loads(
+        (tmp_path / ".local/owner-eks" / runtime.kind / "traffic.json").read_text()
+    )
+    assert saved["successful_requests"] == 17 and saved["complete"] is False
+
+
 @pytest.mark.parametrize(
     "failure",
     [

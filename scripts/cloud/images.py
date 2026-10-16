@@ -250,7 +250,10 @@ def publish_runtime(cloud) -> ReleaseImages:
                     ]
                 ),
             )
-            if config != identities[name]:
+            # Classic Docker reports the config ID. Its containerd store may
+            # report the platform manifest or OCI index ID instead. All three
+            # are content-addressed members of this exact published closure.
+            if identities[name] not in (digest, manifest, config):
                 raise RuntimeError(
                     "Registry runtime does not match the locally verified image."
                 )

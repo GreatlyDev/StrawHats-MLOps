@@ -31,6 +31,7 @@ def release(images, monkeypatch, tmp_path):
         change_after_build=False,
         expire_after_build=False,
         fail_second=False,
+        index_identity=False,
     )
     repository = f"{ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/strawhats-midterm/"
 
@@ -67,7 +68,13 @@ def release(images, monkeypatch, tmp_path):
             return json.dumps(
                 [
                     {
-                        "Id": "sha256:" + ("2" if operator else "1") * 64,
+                        "Id": "sha256:"
+                        + (
+                            ("b" if operator else "a")
+                            if state.index_identity
+                            else ("2" if operator else "1")
+                        )
+                        * 64,
                         "Os": "linux",
                         "Architecture": "amd64",
                         "Config": {
@@ -128,6 +135,14 @@ def test_both_verified_digests_are_saved_as_one_release(images, release):
     assert len(state.pushes) == 2
     assert json.loads((folder / "images.json").read_text()) == asdict(result)
     assert "test-secret" not in "".join(p.read_text() for p in folder.rglob("*.json"))
+
+
+def test_containerd_store_identity_can_be_the_published_manifest(images, release):
+    state, cloud, folder = release
+    state.index_identity = True
+    result = images.publish_runtime(cloud)
+    assert result.model.image.endswith("a" * 64)
+    assert result.model.runtime_config_digest.endswith("1" * 64)
 
 
 @pytest.mark.parametrize("condition", ["change_after_build", "expire_after_build"])
