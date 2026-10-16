@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 
-from backend.app.local_cluster import IMAGE, NAME, NAMESPACE
+from backend.app.iris_target import LOCAL_TARGET, RuntimeTarget
 from backend.model_operator.spec import Target, choose_target
 from scripts.monitoring.observations import Observation
 
@@ -41,17 +41,21 @@ def _number(value, *, positive=False):
 
 
 def validate_snapshot(
-    resource: dict, observation: Observation, at: datetime
+    resource: dict,
+    observation: Observation,
+    at: datetime,
+    *,
+    target: RuntimeTarget = LOCAL_TARGET,
 ) -> SizingSnapshot:
     """Reject insufficient, stale, partial or differently owned observations."""
     try:
-        target = choose_target(resource)
+        effective = choose_target(resource)
         metadata, status = resource["metadata"], resource["status"]
         pods = observation.pod_usage
         valid = (
             at.utcoffset() is not None
-            and metadata["name"] == NAME
-            and metadata["namespace"] == NAMESPACE
+            and metadata["name"] == target.name
+            and metadata["namespace"] == target.namespace
             and isinstance(metadata["uid"], str)
             and bool(metadata["uid"])
             and not metadata.get("deletionTimestamp")
@@ -61,15 +65,15 @@ def validate_snapshot(
             == observation.generation
             and status["phase"] in ("Ready", "RolledBack")
             and type(status["readyReplicas"]) is int
-            and status["readyReplicas"] == target.replicas
-            and target.image == status["image"] == observation.image == IMAGE
+            and status["readyReplicas"] == effective.replicas
+            and effective.image == status["image"] == observation.image == target.image
             and observation.resource_uid == metadata["uid"]
             and observation.available is True
             and observation.alert_state == "inactive"
             and _number(observation.recent_predictions)
             and observation.recent_predictions >= 20
             and type(observation.target_count) is int
-            and len(pods) == observation.target_count == target.replicas
+            and len(pods) == observation.target_count == effective.replicas
             and len({pod.name for pod in pods})
             == len({pod.uid for pod in pods})
             == len(pods)

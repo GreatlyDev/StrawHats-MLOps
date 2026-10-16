@@ -15,7 +15,8 @@ from kubernetes import client
 from kubernetes.client.exceptions import ApiException
 from urllib3.exceptions import HTTPError
 
-from backend.app.local_cluster import GROUP, IMAGE, NAME, NAMESPACE, PLURAL, VERSION
+from backend.app.iris_target import LOCAL_TARGET, RuntimeTarget
+from backend.app.local_cluster import GROUP, PLURAL, VERSION
 from backend.app.local_inference import DeployedPredictionInput, predict_with_service
 from backend.model_operator.reconcile import _matches
 from backend.model_operator.spec import choose_target
@@ -94,16 +95,16 @@ def _identity(current, accepted):
         return False
 
 
-def _patch(cluster, source, target, annotations):
+def _patch(cluster, source, target, annotations, *, runtime):
     metadata = source["metadata"]
     if not metadata.get("resourceVersion"):
         raise ValueError("A current resourceVersion is required.")
     return cluster.custom.patch_namespaced_custom_object(
         GROUP,
         VERSION,
-        NAMESPACE,
+        runtime.namespace,
         PLURAL,
-        NAME,
+        runtime.name,
         body={
             "metadata": {
                 "uid": metadata["uid"],
@@ -124,7 +125,7 @@ def _expected(source, target, annotations):
     return result
 
 
-def _verify(cluster, accepted, *, monotonic, wait):
+def _verify(cluster, accepted, *, monotonic, wait, runtime):
     deadline = monotonic() + 180
 
     def timeout():
@@ -155,12 +156,13 @@ def _verify(cluster, accepted, *, monotonic, wait):
                 expected_uid=accepted["metadata"]["uid"],
                 before_request=timeout,
                 request_timeout=timeout,
+                target=runtime,
             )
             same(resource)
             target = choose_target(resource)
             pods = cluster.sdk.sanitize_for_serialization(
                 client.CoreV1Api(cluster.sdk).list_namespaced_pod(
-                    NAMESPACE,
+                    runtime.namespace,
                     label_selector=f"mlops.strawhats.dev/owner-uid={resource['metadata']['uid']}",
                     _request_timeout=timeout(),
                 )
@@ -172,7 +174,7 @@ def _verify(cluster, accepted, *, monotonic, wait):
             ready = {
                 pod["metadata"]["uid"]
                 for pod in pods
-                if pod["metadata"].get("namespace") == NAMESPACE
+                if pod["metadata"].get("namespace") == runtime.namespace
                 and not pod["metadata"].get("deletionTimestamp")
                 and pod["metadata"]
                 .get("labels", {})
@@ -185,14 +187,14 @@ def _verify(cluster, accepted, *, monotonic, wait):
                 )
                 and any(
                     c.get("name") == "iris"
-                    and c.get("image") == IMAGE
+                    and c.get("image") == runtime.image
                     and _matches(c.get("resources"), desired)
                     for c in pod["spec"]["containers"]
                 )
             }
             slices = cluster.sdk.sanitize_for_serialization(
                 client.DiscoveryV1Api(cluster.sdk).list_namespaced_endpoint_slice(
-                    NAMESPACE,
+                    runtime.namespace,
                     label_selector="kubernetes.io/service-name=iris",
                     _request_timeout=timeout(),
                 )
@@ -201,11 +203,11 @@ def _verify(cluster, accepted, *, monotonic, wait):
             endpoints = {
                 ep["targetRef"]["uid"]
                 for item in slices
-                if item.get("metadata", {}).get("namespace") == NAMESPACE
+                if item.get("metadata", {}).get("namespace") == runtime.namespace
                 and item.get("metadata", {})
                 .get("labels", {})
                 .get("kubernetes.io/service-name")
-                == NAME
+                == runtime.name
                 and not item.get("metadata", {}).get("deletionTimestamp")
                 and any(
                     p.get("name") == "http"
@@ -217,7 +219,7 @@ def _verify(cluster, accepted, *, monotonic, wait):
                 if ep.get("conditions", {}).get("ready") is True
                 and not ep.get("conditions", {}).get("terminating", False)
                 and ep.get("targetRef", {}).get("kind") == "Pod"
-                and ep.get("targetRef", {}).get("namespace") == NAMESPACE
+                and ep.get("targetRef", {}).get("namespace") == runtime.namespace
             }
             if len(ready) == target.replicas and ready == endpoints:
                 prediction = predict_with_service(
@@ -226,6 +228,7 @@ def _verify(cluster, accepted, *, monotonic, wait):
                     DeployedPredictionInput(features=[5.1, 3.5, 1.4, 0.2]),
                     before_request=timeout,
                     request_timeout=timeout,
+                    target=runtime,
                 )
                 same(cluster.resource(request_timeout=timeout()))
                 return {
@@ -256,6 +259,8 @@ def run_adjustment(
     now=lambda: datetime.now(timezone.utc),
     monotonic=time.monotonic,
     wait=time.sleep,
+    target: RuntimeTarget = LOCAL_TARGET,
+    before_mutation=None,
 ) -> dict:
     run_id = str(uuid4())
     path = evidence_dir / f"{now().strftime('%Y%m%dT%H%M%S%fZ')}-{run_id}.json"
@@ -277,6 +282,10 @@ def run_adjustment(
         return result
 
     try:
+        if apply and target.kind != "local" and before_mutation is None:
+            return finish(
+                "unavailable", "A verified runtime mutation guard is required."
+            )
         resource = cluster.resource()
         if not resource:
             return finish(
@@ -286,7 +295,9 @@ def run_adjustment(
             return finish(
                 "held", "The five-minute automatic-change cooldown is active."
             )
-        snapshot = validate_snapshot(resource, observe(cluster, prometheus), now())
+        snapshot = validate_snapshot(
+            resource, observe(cluster, prometheus, target=target), now(), target=target
+        )
         prior = choose_target(snapshot.resource)
         result["before"] = prior.to_spec()
         choices = candidates(snapshot)
@@ -301,7 +312,9 @@ def run_adjustment(
             advisor(snapshot, choices, key=key, model=model)
         )
         resource = cluster.resource()
-        fresh = validate_snapshot(resource, observe(cluster, prometheus), now())
+        fresh = validate_snapshot(
+            resource, observe(cluster, prometheus, target=target), now(), target=target
+        )
         if (
             monotonic() - started > 60
             or resource["metadata"]["uid"] != snapshot.resource["metadata"]["uid"]
@@ -324,8 +337,8 @@ def run_adjustment(
         ):
             return finish("unavailable", "The selected action is no longer eligible.")
         result["action"] = decision.action.value
-        target = offered[decision.action]
-        result["after"] = target.to_spec()
+        proposed = offered[decision.action]
+        result["after"] = proposed.to_spec()
         if decision.action == Action.HOLD:
             return finish("held", "The AI selected Hold; no change was made.")
         if not apply:
@@ -333,7 +346,7 @@ def run_adjustment(
         if not resource["metadata"].get("resourceVersion"):
             raise ValueError("A current resourceVersion is required.")
         annotations = {STAMP: now().astimezone(timezone.utc).isoformat(), RUN: run_id}
-        expected = _expected(resource, target, annotations)
+        expected = _expected(resource, proposed, annotations)
         result["state"] = "pending"
         save_evidence(path, result)
     except RecommendationUnavailable as error:
@@ -354,7 +367,18 @@ def run_adjustment(
         )
 
     try:
-        accepted = _patch(cluster, resource, target, annotations)
+        if before_mutation:
+            before_mutation()
+        validate_snapshot(resource, fresh.observation, now(), target=target)
+        if monotonic() - started > 60:
+            raise ValueError("Decision expired during mutation verification.")
+    except (ValueError, HTTPException, ApiException, *CONNECTION_ERRORS):
+        return finish(
+            "unavailable",
+            "The runtime window or observations expired; no change was made.",
+        )
+    try:
+        accepted = _patch(cluster, resource, proposed, annotations, runtime=target)
     except ApiException as error:
         state = (
             "unavailable"
@@ -376,7 +400,9 @@ def run_adjustment(
             "Kubernetes did not confirm the exact proposed revision; no restoration attempted.",
         )
     try:
-        result["readiness"] = _verify(cluster, accepted, monotonic=monotonic, wait=wait)
+        result["readiness"] = _verify(
+            cluster, accepted, monotonic=monotonic, wait=wait, runtime=target
+        )
         return finish(
             "applied",
             "The exact adjusted revision is ready and served a valid Iris prediction.",
@@ -401,10 +427,14 @@ def run_adjustment(
         if not _identity(current, accepted):
             raise Superseded
         expected_restore = _expected(current, prior, annotations)
-        restored = _patch(cluster, current, prior, annotations)
+        if before_mutation:
+            before_mutation()
+        restored = _patch(cluster, current, prior, annotations, runtime=target)
         if not _identity(restored, expected_restore):
             raise Superseded
-        result["recovery"] = _verify(cluster, restored, monotonic=monotonic, wait=wait)
+        result["recovery"] = _verify(
+            cluster, restored, monotonic=monotonic, wait=wait, runtime=target
+        )
         return finish(
             "restored",
             "Adjustment failed; captured prior settings were restored and verified.",

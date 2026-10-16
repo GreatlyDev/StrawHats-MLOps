@@ -78,7 +78,7 @@ def harness(monkeypatch, cluster, monitoring, responses, tmp_path):
         assert (group, version, namespace, plural, name) == (
             "mlops.strawhats.dev",
             "v1alpha1",
-            "strawhats-operator-local",
+            cluster.data["metadata"]["namespace"],
             "modeldeployments",
             "iris",
         )
@@ -115,7 +115,7 @@ def harness(monkeypatch, cluster, monitoring, responses, tmp_path):
     cluster.custom = SimpleNamespace(patch_namespaced_custom_object=patch)
 
     def list_pods(namespace, **kwargs):
-        assert namespace == monitoring.NAMESPACE
+        assert namespace == cluster.data["metadata"]["namespace"]
         h.timeouts.append(kwargs.get("_request_timeout"))
         result = cluster.sdk.sanitize_for_serialization(pods)
         template, _ = render_workload(cluster.data, choose_target(cluster.data))
@@ -129,7 +129,7 @@ def harness(monkeypatch, cluster, monitoring, responses, tmp_path):
         return render_workload(cluster.data, choose_target(cluster.data))[1]
 
     def endpoints(namespace, **kwargs):
-        assert namespace == monitoring.NAMESPACE
+        assert namespace == cluster.data["metadata"]["namespace"]
         h.timeouts.append(kwargs.get("_request_timeout"))
         return {
             "items": [
@@ -161,7 +161,7 @@ def harness(monkeypatch, cluster, monitoring, responses, tmp_path):
         assert path == "/api/v1/namespaces/{namespace}/services/{name}/proxy/{path}"
         assert method == "POST"
         assert kwargs["path_params"] == {
-            "namespace": monitoring.NAMESPACE,
+            "namespace": cluster.data["metadata"]["namespace"],
             "name": "iris:8000",
             "path": "predict",
         }
@@ -196,7 +196,7 @@ def harness(monkeypatch, cluster, monitoring, responses, tmp_path):
             return h.before_decision()
         return Decision(action="decrease_cpu", reason="Measured low CPU with headroom.")
 
-    def run(execution, apply=True, key="private-test-key"):
+    def run(execution, apply=True, key="private-test-key", **options):
         with prom_client(responses) as prom:
             return execution.run_adjustment(
                 cluster,
@@ -209,6 +209,7 @@ def harness(monkeypatch, cluster, monitoring, responses, tmp_path):
                 now=clock.now,
                 monotonic=clock.monotonic,
                 wait=clock.sleep,
+                **options,
             )
 
     h.run, h.pods, h.responses = run, pods, responses

@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from kubernetes.client.exceptions import ApiException
 from urllib3.exceptions import HTTPError
 
+from backend.app.iris_target import LOCAL_TARGET, RuntimeTarget
 from backend.app.local_cluster import LocalCluster, connect_local_cluster
 from backend.app.local_inference import DeployedPredictionInput, predict_with_service
 from scripts.monitoring.observations import (
@@ -34,6 +35,7 @@ def run_demo(
     *,
     clock: Callable[[], float],
     sleep: Callable[[float], None],
+    target: RuntimeTarget = LOCAL_TARGET,
 ) -> dict:
     started = clock()
     report = {
@@ -56,12 +58,13 @@ def run_demo(
             expected_generation=expected,
             expected_uid=resource_uid if expected is not None else None,
             before_request=guard,
+            target=target,
         )
 
     def sample():
         snapshot(generation)
         guard()
-        result = observe(cluster, prometheus, before_request=guard)
+        result = observe(cluster, prometheus, before_request=guard, target=target)
         # An in-flight operation may finish after the deadline; no next work starts.
         snapshot(generation)
         report["observations"].append(
@@ -86,6 +89,7 @@ def run_demo(
             resource,
             DeployedPredictionInput(features=VECTORS[label]),
             before_request=guard,
+            target=target,
         )
         report["successful_requests"] += 1
         snapshot(generation)
