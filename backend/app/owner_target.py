@@ -1,13 +1,16 @@
 """Internal runtime selection and immutable connection binding checks."""
 
+from __future__ import annotations
+
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 
-from scripts.cloud.runtime_contract import RuntimeReceipt, fingerprint
-from scripts.cloud.runtime_manifests import document_key, render_runtime
+if TYPE_CHECKING:
+    from scripts.cloud.runtime_contract import RuntimeReceipt
 
 from .iris_target import LOCAL_TARGET, RuntimeTarget
 
@@ -34,6 +37,8 @@ class OwnerConnection:
 
 
 def receipt_binding(receipt):
+    from scripts.cloud.runtime_contract import fingerprint
+
     value = asdict(receipt)
     value.pop("phase")
     value.pop("inventory")
@@ -49,6 +54,8 @@ def check_phase(receipt, purpose):
     if purpose not in allowed or receipt.phase not in allowed[purpose]:
         raise ValueError("Runtime phase does not permit this operation.")
     if purpose == "operate":
+        from scripts.cloud.runtime_manifests import document_key, render_runtime
+
         bundle = render_runtime(receipt.target)
         required = {
             document_key(d)
@@ -63,6 +70,8 @@ def check_phase(receipt, purpose):
 
 
 def check_binding(connection, binding):
+    from scripts.cloud.runtime_contract import RuntimeReceipt
+
     receipt = RuntimeReceipt.load(connection.receipt_path)
     if (
         receipt_binding(receipt) != binding
