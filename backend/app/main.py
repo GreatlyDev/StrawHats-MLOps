@@ -18,8 +18,10 @@ from starlette.responses import Response
 
 from .assistant import AssistantUnavailable, answer
 from .deployments import cluster_status, preview
+from .iris_routes import iris_router
 from .local_operator import local_operator_router
 from .models import predict_example, train_example
+from .owner_target import owner_connection
 from .schemas import AssistantInput, DeploymentInput, PredictionInput, RegisterModel
 from .store import Store, now
 
@@ -63,6 +65,61 @@ def create_app(data_dir: Path | None = None, test_mode: bool = False) -> FastAPI
             record_event=store.event,
         )
     )
+    owner_kind = "disabled" if test_mode else os.getenv("OWNER_CLUSTER_TARGET", "local")
+    owner_config = {
+        name: os.getenv(name, "")
+        for name in (
+            "EKS_AWS_PROFILE",
+            "EKS_EXPECTED_ACCOUNT",
+            "EKS_RELEASE_RECEIPT",
+            "REHEARSAL_RECEIPT",
+        )
+    }
+    descriptions = {
+        "local": (
+            "/local-iris",
+            "Local Iris",
+            "Deploy and manage Iris on Docker Desktop Kubernetes.",
+        ),
+        "eks": (
+            "/eks-iris",
+            "AWS EKS Iris",
+            "Manage the verified owner release on AWS Kubernetes.",
+        ),
+        "rehearsal": (
+            "/rehearsal-iris",
+            "Rehearsal Iris",
+            "Manage the dedicated local release rehearsal on Docker Desktop.",
+        ),
+    }
+    for kind in ("eks", "rehearsal"):
+        prefix, label, _ = descriptions[kind]
+        app.include_router(
+            iris_router(
+                prefix="/api" + prefix,
+                label=label,
+                enabled=owner_kind == kind,
+                connect=lambda kind=kind: owner_connection(kind, owner_config),
+                record_event=store.event,
+            )
+        )
+
+    @app.get("/api/owner-target")
+    def owner_target():
+        if owner_kind not in descriptions:
+            return {
+                "kind": "disabled",
+                "api_prefix": None,
+                "title": "Cluster controls unavailable",
+                "description": "A configured private owner workspace is required.",
+            }
+        prefix, title, description = descriptions[owner_kind]
+        return {
+            "kind": owner_kind,
+            "api_prefix": prefix,
+            "title": title,
+            "description": description,
+        }
 
     def find_model(model_id: str) -> dict:
         model = store.model(model_id)

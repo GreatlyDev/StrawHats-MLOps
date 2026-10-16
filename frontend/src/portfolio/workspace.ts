@@ -75,6 +75,9 @@ export function createPortfolioRequest(asset: unknown): WorkspaceRequest {
     let result: unknown;
     if (body === undefined) {
       switch (path) {
+        case '/owner-target':
+          result = { kind: 'disabled', api_prefix: null };
+          break;
         case '/models':
           result = [model];
           break;
