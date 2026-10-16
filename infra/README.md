@@ -1,11 +1,10 @@
 # Iris on AWS EKS
 
-This milestone prepares one EKS cluster and one stateless Iris model. **The image
-is verified locally; no AWS runtime has been created or verified.** The
-[local Iris operator](kubernetes/operator/README.md) verifies CRD deployment,
-scaling, and rollback in Docker Desktop Kubernetes. Cloud integration, monitoring,
-AI resource adjustment, and the public website remain later assignment milestones.
-The deployment CLI is owner-operated, not an automatic cloud CI job.
+The owner release prepares one temporary EKS cluster with the existing Iris
+operator/CRD, model service, Prometheus, Grafana and metrics-server. **No AWS runtime
+or live AI-selected resource adjustment has been verified.** The public portfolio
+runs independently; cluster controls stay in the owner's loopback-only workspace.
+Local rehearsal uses Docker Desktop and is never evidence of an AWS deployment.
 
 ## Runtime and cost boundary
 
@@ -16,8 +15,8 @@ The deployment CLI is owner-operated, not an automatic cloud CI job.
   restricted to the owner's current external IPv4 `/32`.
 - Pod Identity supplies VPC CNI permissions independently of the node role.
   Only networking, DNS, proxy, and Pod Identity add-ons are installed.
-- Private ECR repository with immutable tags; workload uses the actual digest.
-- Iris: one replica, requests 250m/256Mi, limits 500m/512Mi, non-root UID 10001,
+- Two private ECR repositories with immutable tags: Iris and operator. Both use verified digests.
+- Iris: initially one replica, requests 250m/256Mi, limits 500m/512Mi, non-root UID 10001,
   read-only root, dropped capabilities, no service-account token, health probes,
   ClusterIP service. No model storage volume is required.
 - No NAT gateway, load balancer, Auto Mode, GPU, or node autoscaler.
@@ -35,7 +34,7 @@ preparation. Owner approval of a local template is not approval to run it.
 ## Access and preflight
 
 Use current AWS CLI v2, Docker with Buildx and Linux/amd64, Python 3.12, and kubectl compatible
-with Kubernetes 1.35. Local preparation did not install AWS CLI or create keys.
+with Kubernetes 1.35. AWS CLI is installed; account access remains unverified.
 The initial browser session was root; release requires a named non-root owner
 with the appropriate EKS/CloudFormation/IAM/network/ECR permissions and MFA.
 Configure that access interactively when authorized. Never share passwords,
@@ -79,49 +78,118 @@ budget, and end time. Review before supplying the exact change-set ARN:
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.cloud.deploy create --profile strawhats --account <ACCOUNT_ID> --confirm-execute <REVIEWED_CHANGE_SET_ARN>
-.\.venv\Scripts\python.exe -m scripts.cloud.deploy publish --profile strawhats --account <ACCOUNT_ID>
-.\.venv\Scripts\python.exe -m scripts.cloud.deploy apply --profile strawhats --account <ACCOUNT_ID>
-.\.venv\Scripts\python.exe -m scripts.cloud.deploy verify --profile strawhats --account <ACCOUNT_ID>
+.\.venv\Scripts\python.exe -m scripts.cloud.owner_release publish --profile strawhats --account <ACCOUNT_ID>
+.\.venv\Scripts\python.exe -m scripts.cloud.owner_release install --profile strawhats --account <ACCOUNT_ID> --receipt .local/owner-eks/runtime.json
+.\.venv\Scripts\python.exe -m scripts.cloud.owner_release verify --profile strawhats --account <ACCOUNT_ID> --receipt .local/owner-eks/runtime.json
 ```
 
-Create rechecks the reviewed template, parameters, ownership tags, identity,
-eligibility, and future end time. It awaits stack completion and checks exactly
-one Ready worker. Publish requires a clean Git checkout, builds a commit-SHA
-Linux image, verifies that actual rebuilt container before ECR login/push, and
-records its digest and the Linux/amd64 manifest/config identities (including
-OCI indexes with separate attestations). The ECR password goes directly to Docker's stdin; temporary
-task-only Docker credentials are removed afterward. Apply renders an ignored
-digest overlay and awaits rollout. Verify checks workload security/resources,
-the published release digest, its owned Ready pod and ready Service EndpointSlice,
-real HTTP inference, invalid-input rejection and metrics, then restarts the pod
-and repeats those checks on a replacement pod. HTTP verification targets the
-verified pod through a loopback port-forward;
-this milestone does not expose the model or management API publicly.
+Publish requires a clean committed SHA with successful **main push CI** for that
+exact SHA: backend, frontend and monitoring jobs. It builds and checks both
+Linux/amd64 images, then verifies their actual ECR manifest/config identities.
+`.local/owner-eks/images.json` records the complete pair. An interrupted publication
+keeps `publication-progress.json` separate and incomplete; it cannot release a mixed
+pair. Docker credentials are task-local and removed after publication.
 
-Evidence stays under `.local/milestone-one/`, including source SHA, image digest,
-timestamps and measured responses. Successful image publication or rollout alone
-does not mean cloud inference passed. Release mutations stop after the approved
-end; each cloud/Kubernetes mutation rechecks the deadline, including after long
-builds or preflight reads. Cleanup remains available. A failure/timeout stops subsequent operations.
-Safe failure records in `.local/milestone-one/command-failures.jsonl` retain the
-time, operation, status, stack/change-set identifiers, and allowlisted AWS or
-kubectl error codes. Arbitrary process output and credential-operation output
-are excluded. Inspect these records and AWS stack events for fuller diagnosis.
-Inspect AWS stack events and current state before retrying; a partially created
-stack can incur charges even when the CLI reports failure. Do not repeatedly
-create replacement stacks, overwrite immutable tags, or delete other resources.
+Install renders fixed namespaces/RBAC/CRD/operator/ModelDeployment and monitoring
+from maintained sources. It records each accepted object UID, preserving partial
+inventory on failure. Matching shared CRD/addon objects are borrowed; foreign or
+legacy Iris resources stop installation. No second worker is added if capacity is
+insufficient. Server-side acceptance is not readiness: `verify` checks the exact
+operator, images, owned ready Pods, EndpointSlices and real Service inference.
+
+The legacy `scripts.cloud.deploy publish/apply/verify` commands serve the earlier
+raw Deployment milestone only. They do not complete the operator assignment.
+Legacy apply refuses operator-owned Iris. Use `owner_release` for this project.
+
+Every mutation rechecks the account, named non-root owner, owned stack, approved
+window and release binding after slow work. Failed/expired bindings never fall
+back to Docker Desktop. Cleanup may run after expiry. The dedicated release
+kubeconfig contains transport metadata and a controlled named-profile token helper;
+normal Docker Desktop configuration and authentication are preserved.
+
+### Owner workspace and runtime commands
+
+Set these **backend-only** values in ignored `.env.local`, then start the API on
+127.0.0.1:8000 and the normal workspace frontend on 127.0.0.1:5173:
+
+```dotenv
+OWNER_CLUSTER_TARGET=eks
+EKS_AWS_PROFILE=strawhats
+EKS_EXPECTED_ACCOUNT=<ACCOUNT_ID>
+EKS_RELEASE_RECEIPT=<ABSOLUTE_RUNTIME_RECEIPT_PATH>
+```
+
+`OWNER_CLUSTER_TARGET=local` preserves the existing Docker Desktop panel and its
+`LOCAL_OPERATOR_ENABLED=1` opt-in. `rehearsal` uses `REHEARSAL_RECEIPT` instead of
+AWS identity. Restart the API after changing selection. The descriptor reports
+configuration, not connectivity; status/action responses show actual provenance.
+The browser cannot choose an account, context, namespace or image. The standalone
+portfolio disables these operations and makes no provider or cluster request.
+
+Keep only the selected runtime's monitoring forwarded to **127.0.0.1:9090/3000**.
+`managed_forwards(connection)` in `scripts.cloud.runtime_forwards` owns these two
+kubectl children, refuses occupied ports and stops only its own children. Use the
+validated release kubeconfig and exact context when forwarding manually. Never
+reuse an old local forward to demonstrate EKS metrics. Observations additionally
+verify current owned Pods, image, source timestamps and recording rules.
+
+```powershell
+python -m scripts.cloud.observe_iris --target eks --profile strawhats --account <ACCOUNT_ID> --receipt .local/owner-eks/runtime.json
+python -m scripts.cloud.traffic_iris --target eks --profile strawhats --account <ACCOUNT_ID> --receipt .local/owner-eks/runtime.json --run-demo
+python -m scripts.cloud.adjust_iris --target eks --profile strawhats --account <ACCOUNT_ID> --receipt .local/owner-eks/runtime.json
+# Only after a successful live preview and owner approval:
+python -m scripts.cloud.adjust_iris --target eks --profile strawhats --account <ACCOUNT_ID> --receipt .local/owner-eks/runtime.json --apply
+```
+
+Adjustment defaults to preview and uses the existing server-only key. It offers
+Hold or one bounded CPU/memory ladder step, preserves 1–2 replicas, enforces fresh
+telemetry and a five-minute cooldown, and verifies the exact accepted revision
+and real prediction. Failed known rollouts permit one guarded restoration with
+its own 180-second deadline. Unknown write outcomes never retry blindly. A
+rate-limited/missing provider is an unavailable outcome, not a successful AI demo.
+Evidence is separated by runtime in `.local/owner-eks/` and stays outside Git.
+
+### Local release rehearsal
+
+This workflow creates only dedicated Docker Desktop namespaces `strawhats` and
+`strawhats-monitoring`. It refuses collisions, builds/imports real source-SHA model
+and operator images, and preserves the original `*-local` workloads and borrowed
+CRD/metrics-server. Start from a clean committed branch:
+
+```powershell
+python -m scripts.cloud.rehearse prepare --receipt .local/owner-eks/rehearsal/runtime.json
+python -m scripts.cloud.rehearse verify --receipt .local/owner-eks/rehearsal/runtime.json
+python -m scripts.cloud.rehearse cleanup --receipt .local/owner-eks/rehearsal/runtime.json
+```
+
+For WSL, use Linux Python3.12 and pass the existing Windows kubeconfig as
+`--kubeconfig /mnt/c/Users/<USER>/.kube/config` to `prepare`. It reads certificate
+authentication without copying credentials. WSL can resolve Windows `aws.exe`;
+the version bridge was checked without sign-in or an AWS endpoint call. Use one
+consistent runtime/path convention for a receipt. If Windows blocks native orjson,
+use Linux Python; do not disable Windows application security.
+
+Cleanup uses recorded UIDs and refuses foreign children in owned namespaces.
+Inspect the partial receipt after any failure; do not reset Kubernetes or delete
+namespaces manually to get around an ownership failure. Local acceptance and
+controlled provider tests do not establish live EKS or live AI acceptance.
 
 ## Explicit cleanup
 
 Inspect the project stack ARN and its resource list first. Shutdown requires
-separate owner authorization. Supply its exact ARN to the cleanup command:
+separate owner authorization. Remove the runtime first, then supply the exact stack ARN. Both stages require
+owner authorization; this preparation stage executes neither AWS command:
+
+```powershell
+python -m scripts.cloud.owner_release remove --profile strawhats --account <ACCOUNT_ID> --receipt .local/owner-eks/runtime.json
+```
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.cloud.deploy cleanup --profile strawhats --account <ACCOUNT_ID> --confirm-delete <INSPECTED_PROJECT_STACK_ARN>
 ```
 
 Cleanup verifies the account, named owner, and project/milestone tags, empties
-only the project's ECR repository, deletes the stack, waits, and checks that the
+only both verified project ECR repositories, deletes the stack, waits, and checks that the
 cluster, worker instances, tagged disks, tagged elastic IPs, and VPC network
 interfaces are gone. Review partial-failure stack events if cleanup stops.
 Resources already deleted in a previous attempt may need manual, individually
