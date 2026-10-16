@@ -138,6 +138,29 @@ def test_busy_port_never_spawns_or_stops_another_process(forwards, monkeypatch):
             pytest.fail("Occupied forward accepted")
 
 
+def test_wsl_uses_working_windows_docker_bridge(command, monkeypatch):
+    monkeypatch.setattr(command.shutil, "which", lambda n: "/mnt/c/bin/" + n)
+    calls = []
+    monkeypatch.setattr(
+        command, "run_checked", lambda argv, **kwargs: calls.append(argv) or "ok"
+    )
+    assert command.run(["docker", "inspect", "desktop-control-plane"]) == "ok"
+    assert calls[0][0] == "/mnt/c/bin/docker.exe"
+
+
+def test_windows_kubectl_receives_its_native_path(forwards):
+    assert (
+        forwards.cli_path("/mnt/c/Users/Great/.kube/config", "/mnt/c/bin/kubectl.exe")
+        == "C:/Users/Great/.kube/config"
+    )
+    assert (
+        forwards.cli_path("/home/owner/config", "/usr/bin/kubectl")
+        == "/home/owner/config"
+    )
+    with pytest.raises(ValueError):
+        forwards.cli_path("/tmp/config", "/mnt/c/bin/kubectl.exe")
+
+
 @pytest.mark.parametrize("crashed", [False, True])
 def test_only_owned_forwards_are_stopped_and_crashes_reject_reads(
     forwards, connection, monkeypatch, crashed

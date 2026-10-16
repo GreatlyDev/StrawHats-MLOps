@@ -1,5 +1,6 @@
 """Own two loopback kubectl children; never reuse an occupied listener."""
 
+import re
 import shutil
 import socket
 import subprocess
@@ -54,6 +55,18 @@ class ForwardSession:
                     process.wait(timeout=5)
 
 
+def cli_path(path, executable):
+    value = str(path)
+    if executable.endswith(".exe") and value.startswith("/"):
+        match = re.fullmatch(r"/mnt/([a-z])/(.+)", value)
+        if not match:
+            raise ValueError(
+                "The Windows CLI requires a path on a mounted Windows drive."
+            )
+        return match[1].upper() + ":/" + match[2]
+    return value
+
+
 @contextmanager
 def managed_forwards(connection):
     if (
@@ -77,7 +90,7 @@ def managed_forwards(connection):
                     "--context",
                     connection.target.context,
                     "--kubeconfig",
-                    connection.receipt.kubeconfig,
+                    cli_path(connection.receipt.kubeconfig, executable),
                     "-n",
                     connection.target.monitoring_namespace,
                     "port-forward",

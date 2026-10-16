@@ -56,7 +56,7 @@ def _metadata(receipt):
 
 
 def _images(receipt):
-    executable = shutil.which("docker") or shutil.which("docker.exe")
+    executable = shutil.which("docker.exe") or shutil.which("docker")
     if not executable:
         raise ValueError("Local Docker CLI is required for rehearsal identity checks.")
 

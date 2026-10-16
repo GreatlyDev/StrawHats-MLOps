@@ -35,7 +35,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def run(argv, **kwargs):
-    executable = shutil.which(argv[0]) or shutil.which(argv[0] + ".exe")
+    executable = (
+        (shutil.which("docker.exe") if argv[0] == "docker" else None)
+        or shutil.which(argv[0])
+        or shutil.which(argv[0] + ".exe")
+    )
     if not executable:
         raise RuntimeError("A required local executable is missing.")
     return run_checked([executable, *argv[1:]], **kwargs)
@@ -43,7 +47,7 @@ def run(argv, **kwargs):
 
 def import_images(node, images):
     """Pipe bytes directly between child processes, including under PowerShell/WSL."""
-    docker = shutil.which("docker") or shutil.which("docker.exe")
+    docker = shutil.which("docker.exe") or shutil.which("docker")
     if node != "desktop-control-plane" or not docker:
         raise RuntimeError("Only the verified Docker Desktop kind node is supported.")
     with tempfile.TemporaryFile() as errors:
