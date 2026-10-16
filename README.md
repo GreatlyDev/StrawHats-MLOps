@@ -2,7 +2,7 @@
 
 **COSC 472 · Group 12 · Straw Hats**
 
-A model operations dashboard for registering ML models, testing inference, preparing Kubernetes deployment configuration, and asking for deployment guidance through LangChain. This repository is the first local foundation of the group's ML Deployment Orchestrator.
+A model operations dashboard for registering ML models, testing inference, preparing Kubernetes deployment configuration, and asking for deployment guidance through LangChain. The owner workspace connects the group's ML Deployment Orchestrator to a verified Kubernetes runtime.
 
 **Live demo:** [strawhats-mlops.vercel.app](https://strawhats-mlops.vercel.app)
 
@@ -30,11 +30,16 @@ Each teammate reviews, tests, and commits their contributions through feature br
 - LangChain/OpenAI guidance with server-only credentials and actionable provider errors.
 - Standalone Iris model service verified in a hardened Linux container.
 - Namespaced Python Kubernetes operator with a bounded ModelDeployment CRD, verified local scaling and explicit rollback; see [local operator setup](infra/kubernetes/operator/README.md).
-- Opt-in Local Iris dashboard controls, restricted to one Docker Desktop namespace/resource; accepted requests remain Pending until the operator observes the change.
+- Opt-in private Iris dashboard controls, bound to one configured local/rehearsal/EKS release; accepted requests remain Pending until the operator observes the change.
 - Deployed Iris predictions through the fixed local Kubernetes Service, with measured probabilities, model latency, and deployment provenance.
 - Local Iris serving telemetry, one provisioned Prometheus/Grafana dashboard, Kubernetes pod resource readings and a bounded prediction-concentration warning demo; see [local monitoring setup](infra/kubernetes/monitoring/README.md).
 
 Container registrations store metadata. The name/version Iris classifier v1.0.0 is reserved for the built-in example. Local inference supports the bundled Iris example; external images require a separately deployed endpoint. Previews do not apply workloads to a cluster.
+
+The [owner release guide](infra/README.md) covers the CI-gated two-image release,
+private runtime selection, dedicated local rehearsal and UID-checked cleanup.
+Cloud preparation and simulated provider tests do not establish live AWS or live
+AI acceptance; those remain required before claiming the assignment complete.
 
 ## Architecture
 
@@ -52,7 +57,7 @@ Standalone model service: /health, /predict, /metrics
 Local Kubernetes: ModelDeployment CRD → Python operator → Iris Deployment/Service
 Local monitoring: Iris /metrics → Prometheus → Grafana + concentration alert
 Standalone portfolio: exported Iris → browser inference + session YAML previews
-Future: bounded AI adjustment + cloud release
+Owner tools: bounded LangChain adjustment + CI-gated cloud release preparation
 ```
 
 The connected dashboard does not receive provider keys. Its local records and trained artifacts live in `.local/`, which is excluded from Git. Prometheus counters reset with the process; workspace totals persist in SQLite. Median latency covers the last 30 recorded predictions.

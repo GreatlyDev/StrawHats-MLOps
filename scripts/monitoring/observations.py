@@ -14,15 +14,15 @@ import httpx
 from fastapi import HTTPException
 from kubernetes import client
 
+from backend.app.iris_target import LOCAL_TARGET, RuntimeTarget
 from backend.app.local_cluster import (
-    IMAGE,
-    NAME,
-    NAMESPACE,
     TIMEOUT,
     LocalCluster,
     connect_local_cluster,
 )
 from backend.model_operator.spec import choose_target
+
+IMAGE, NAME, NAMESPACE = LOCAL_TARGET.image, LOCAL_TARGET.name, LOCAL_TARGET.namespace
 
 PROMETHEUS_URL = "http://127.0.0.1:9090"
 ALERT_NAME = "IrisPredictionDistributionSkew"
@@ -79,6 +79,7 @@ def require_snapshot(
     expected_uid: str | None = None,
     before_request: Callable[[], None] | None = None,
     request_timeout=None,
+    target: RuntimeTarget = LOCAL_TARGET,
 ) -> dict:
     if before_request:
         before_request()
@@ -96,12 +97,12 @@ def require_snapshot(
 
     resource = cluster.resource(**options())
     try:
-        target = choose_target(resource)
+        effective = choose_target(resource)
         metadata, status = resource["metadata"], resource["status"]
         generation = metadata["generation"]
         valid = (
-            metadata["name"] == NAME
-            and metadata["namespace"] == NAMESPACE
+            metadata["name"] == target.name
+            and metadata["namespace"] == target.namespace
             and isinstance(metadata.get("uid"), str)
             and bool(metadata["uid"])
             and (expected_uid is None or metadata["uid"] == expected_uid)
@@ -110,8 +111,8 @@ def require_snapshot(
             and status["observedGeneration"] == generation
             and status["phase"] in ("Ready", "RolledBack")
             and type(status["readyReplicas"]) is int
-            and status["readyReplicas"] == target.replicas
-            and target.image == status["image"] == IMAGE
+            and status["readyReplicas"] == effective.replicas
+            and effective.image == status["image"] == target.image
             and (expected_generation is None or generation == expected_generation)
         )
     except (KeyError, TypeError, ValueError):
@@ -351,8 +352,9 @@ def observe(
     prometheus: httpx.Client,
     *,
     before_request: Callable[[], None] | None = None,
+    target: RuntimeTarget = LOCAL_TARGET,
 ) -> Observation:
-    resource = require_snapshot(cluster, before_request=before_request)
+    resource = require_snapshot(cluster, before_request=before_request, target=target)
     fetch = partial(_fetch, prometheus, before_request=before_request)
     query_samples = []
 
@@ -365,19 +367,19 @@ def observe(
         before_request()
     pods = cluster.sdk.sanitize_for_serialization(
         client.CoreV1Api(cluster.sdk).list_namespaced_pod(
-            NAMESPACE,
+            target.namespace,
             label_selector=f"mlops.strawhats.dev/owner-uid={resource['metadata']['uid']}",
             _request_timeout=TIMEOUT,
         )
     )["items"]
     names = {pod["metadata"]["name"] for pod in pods}
     pod_valid = len(names) == resource["status"]["readyReplicas"] and all(
-        pod["metadata"].get("namespace") == NAMESPACE
+        pod["metadata"].get("namespace") == target.namespace
         and not pod["metadata"].get("deletionTimestamp")
         and pod["metadata"].get("labels", {}).get("mlops.strawhats.dev/owner-uid")
         == resource["metadata"]["uid"]
         and any(
-            container["name"] == "iris" and container["image"] == IMAGE
+            container["name"] == "iris" and container["image"] == target.image
             for container in pod["spec"]["containers"]
         )
         and any(
@@ -399,8 +401,8 @@ def observe(
         and None not in instances
         and {item.get("labels", {}).get("pod") for item in targets} == names
         and all(
-            item.get("labels", {}).get("namespace") == NAMESPACE
-            and item.get("labels", {}).get("image") == IMAGE
+            item.get("labels", {}).get("namespace") == target.namespace
+            and item.get("labels", {}).get("image") == target.image
             and item.get("health") == "up"
             and not item.get("lastError")
             and _fresh(item)
@@ -479,7 +481,7 @@ def observe(
             pass  # Missing freshness evidence prevents sizing, preserving dashboard reads.
     return Observation(
         resource["metadata"]["generation"],
-        IMAGE,
+        target.image,
         len(targets),
         available,
         recent,

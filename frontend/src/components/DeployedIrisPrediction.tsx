@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Play } from 'lucide-react';
-import { request } from '../api';
+import type { WorkspaceRequest } from '../portfolio/workspace';
 import type { DeployedPrediction } from '../types';
 import { Badge, ErrorNotice, percent } from './shared';
 
@@ -13,11 +13,13 @@ const features = [
 ];
 
 export default function DeployedIrisPrediction({
+  ownerRequest,
   available,
   busy,
   onBusyChange,
   refresh,
 }: {
+  ownerRequest: WorkspaceRequest;
   available: boolean;
   busy: boolean;
   onBusyChange: (running: boolean) => void;
@@ -57,8 +59,8 @@ export default function DeployedIrisPrediction({
     setRunning(true);
     onBusyChange(true);
     try {
-      const prediction = await request<DeployedPrediction>(
-        '/local-iris/predict',
+      const prediction = await ownerRequest<DeployedPrediction>(
+        '/predict',
         { features: measurements },
         controller.signal,
       );
@@ -82,7 +84,7 @@ export default function DeployedIrisPrediction({
         <div>
           <h3>Predict with deployed Iris</h3>
           <p>
-            Send flower measurements to the Iris Service in local Kubernetes.
+            Send flower measurements to the selected Kubernetes Iris Service.
           </p>
         </div>
         <Badge tone="gold">Kubernetes inference</Badge>

@@ -53,7 +53,7 @@ export interface LocalIris {
   enabled: boolean;
   connected: boolean;
   operator_ready: boolean;
-  context: string;
+  context: string | null;
   namespace: string;
   name: string;
   phase:
@@ -66,7 +66,7 @@ export interface LocalIris {
     | 'Failed'
     | 'Conflict';
   mode: 'Deploy' | 'Rollback' | null;
-  image: string;
+  image: string | null;
   reported_image: string | null;
   desired_replicas: number | null;
   ready_replicas: number;

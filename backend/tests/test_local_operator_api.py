@@ -272,7 +272,7 @@ def test_scaling_preserves_the_verified_target_after_rollback(enabled_api):
         "cpuMillicores": 250,
         "memoryMi": 256,
     }
-    assert cluster.writes[0]["metadata"] == {"resourceVersion": "40"}
+    assert cluster.writes[0]["metadata"] == {"resourceVersion": "40", "uid": "iris-uid"}
 
 
 def test_rollback_changes_mode_without_overwriting_snapshot_or_desired_image(

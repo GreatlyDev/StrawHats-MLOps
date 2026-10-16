@@ -7,6 +7,9 @@ import {
   Server,
 } from 'lucide-react';
 import { request } from '../api';
+import { createOwnerRequest, resolveOwnerTarget } from '../owner-target';
+import type { OwnerTarget } from '../owner-target';
+import type { WorkspaceRequest } from '../portfolio/workspace';
 import { canPredictLocalIris, localIrisControls } from '../local-iris-controls';
 import type { LocalIris as IrisStatus } from '../types';
 import { Badge, ErrorNotice } from './shared';
@@ -31,6 +34,71 @@ export default function LocalIris({
   isActive: boolean;
   refresh: () => Promise<void>;
 }) {
+  const [target, setTarget] = useState(() => resolveOwnerTarget(null));
+  useEffect(() => {
+    if (!isActive) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    async function poll() {
+      try {
+        const metadata = await request<unknown>(
+          '/owner-target',
+          undefined,
+          controller.signal,
+        );
+        if (!stopped) setTarget(resolveOwnerTarget(metadata));
+      } catch {
+        if (!stopped) setTarget(resolveOwnerTarget(null));
+      } finally {
+        if (!stopped) timer = setTimeout(poll, 5000);
+      }
+    }
+    void poll();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isActive]);
+  return (
+    <IrisPanel
+      key={target.kind}
+      target={target}
+      isActive={isActive}
+      refresh={refresh}
+    />
+  );
+}
+
+function IrisPanel({
+  target,
+  isActive,
+  refresh,
+}: {
+  target: OwnerTarget;
+  isActive: boolean;
+  refresh: () => Promise<void>;
+}) {
+  const scope = useRef<ReturnType<typeof createOwnerRequest> | null>(null);
+  useEffect(() => {
+    const current = createOwnerRequest(target, request);
+    scope.current = current;
+    return () => {
+      current.close();
+      scope.current = null;
+    };
+  }, [target]);
+  const ownerRequest = useCallback<WorkspaceRequest>(
+    <T,>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
+      if (!scope.current)
+        return Promise.reject(
+          new DOMException('Owner target changed.', 'AbortError'),
+        );
+      return scope.current.request<T>(path, body, signal);
+    },
+    [],
+  );
   const [status, setStatus] = useState<IrisStatus | null>(null);
   const [replicas, setReplicas] = useState(1);
   const [busy, setBusy] = useState<Action | 'predict' | null>(null);
@@ -60,8 +128,8 @@ export default function LocalIris({
     async function poll() {
       setReading(true);
       try {
-        const observed = await request<IrisStatus>(
-          '/local-iris',
+        const observed = await ownerRequest<IrisStatus>(
+          '',
           undefined,
           controller.signal,
         );
@@ -88,7 +156,7 @@ export default function LocalIris({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [isActive, busy, reload]);
+  }, [isActive, busy, reload, ownerRequest]);
   useEffect(() => {
     if (status?.desired_replicas) setReplicas(status.desired_replicas);
   }, [status?.desired_replicas]);
@@ -100,8 +168,8 @@ export default function LocalIris({
     setActionError('');
     setNotice('');
     try {
-      const accepted = await request<IrisStatus>(
-        `/local-iris/${action}`,
+      const accepted = await ownerRequest<IrisStatus>(
+        `/${action}`,
         action === 'rollback' ? {} : { replicas },
         controller.signal,
       );
@@ -133,11 +201,11 @@ export default function LocalIris({
     >
       <div className="card-heading">
         <div>
-          <h2 id="local-iris-title">Local Iris</h2>
-          <p>Deploy and manage Iris on Docker Desktop Kubernetes.</p>
+          <h2 id="local-iris-title">{target.title}</h2>
+          <p>{target.description}</p>
         </div>
         <Badge tone="gold">
-          <Server size={14} aria-hidden="true" /> Local cluster
+          <Server size={14} aria-hidden="true" /> {target.badge}
         </Badge>
       </div>
       <div
@@ -179,8 +247,8 @@ export default function LocalIris({
       </dl>
       <div className="local-iris-target">
         <span>
-          {status?.context ?? 'docker-desktop'} /{' '}
-          {status?.namespace ?? 'strawhats-operator-local'}
+          {status?.context ?? 'Awaiting verified context'} /{' '}
+          {status?.namespace ?? 'Awaiting verified namespace'}
         </span>
         <small>
           Target image: {status?.image ?? 'Awaiting verified status'}
@@ -250,6 +318,7 @@ export default function LocalIris({
       {isActive && (
         <DeployedIrisPrediction
           key={`${status?.generation}:${status?.image}`}
+          ownerRequest={ownerRequest}
           available={canPredictLocalIris(status, stale, Boolean(busy))}
           busy={Boolean(busy)}
           onBusyChange={predictionBusyChanged}

@@ -630,6 +630,26 @@ def apply(cloud):
         "--image-ids",
         "imageDigest=" + image.split("@")[1],
     )
+    current = json.loads(
+        cloud.kubectl(
+            "get",
+            "deployment",
+            "iris",
+            "-n",
+            "strawhats",
+            "--ignore-not-found",
+            "-o",
+            "json",
+        )
+        or "{}"
+    )
+    if any(
+        owner.get("kind") == "ModelDeployment" and owner.get("controller") is True
+        for owner in current.get("metadata", {}).get("ownerReferences", [])
+    ):
+        raise RuntimeError(
+            "The operator owns Iris; use the owner runtime release instead of legacy apply."
+        )
     overlay = LOCAL / "iris-overlay"
     overlay.mkdir(parents=True, exist_ok=True)
     (overlay / "kustomization.yaml").write_text(
@@ -914,31 +934,9 @@ def cleanup(cloud):
         raise RuntimeError(
             "Could not establish the dedicated project VPC for cleanup verification."
         )
-    repo = outputs.get("RepositoryName") or next(
-        (
-            r["PhysicalResourceId"]
-            for r in resources
-            if r["LogicalResourceId"] == "ImageRepository"
-        ),
-        None,
-    )
-    if repo:
-        if repo != f"{CLUSTER}/iris":
-            raise RuntimeError("Refusing unrelated ECR repository deletion.")
-        images = cloud.aws("ecr", "list-images", "--repository-name", repo)["imageIds"]
-        for start in range(0, len(images), 100):
-            deleted = cloud.aws(
-                "ecr",
-                "batch-delete-image",
-                "--repository-name",
-                repo,
-                "--image-ids",
-                json.dumps(images[start : start + 100]),
-            )
-            if deleted.get("failures"):
-                raise RuntimeError(
-                    "Image cleanup partially failed; stack deletion stopped."
-                )
+    from .images import empty_repositories
+
+    empty_repositories(cloud, outputs, resources)
     cloud.aws("cloudformation", "delete-stack", "--stack-name", stack["StackId"])
     cloud.aws(
         "cloudformation",

@@ -39,6 +39,28 @@ jobs:
         run: python -m scripts.portfolio.export_iris --check
       - name: Test backend
         run: python -m pytest backend/tests -q --disable-plugin-autoload
+      - name: Render representative owner monitoring configurations offline
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from backend.app.iris_target import RuntimeTarget
+          from scripts.cloud.runtime_manifests import render_runtime
+          registry = '123456789012.dkr.ecr.us-east-1.amazonaws.com/strawhats-midterm/'
+          for kind in ('eks', 'rehearsal'):
+              cloud = kind == 'eks'
+              target = RuntimeTarget(kind, 'arn:aws:eks:us-east-1:123456789012:cluster/strawhats-midterm' if cloud else 'docker-desktop', 'strawhats', 'strawhats-monitoring', 'iris', registry + 'iris@sha256:' + 'a' * 64 if cloud else 'strawhats-iris:rehearsal-1234567', 'IfNotPresent' if cloud else 'Never', 'strawhats-model-operator', registry + 'operator@sha256:' + 'b' * 64 if cloud else 'strawhats-model-operator:rehearsal-1234567')
+              document = next(d for d in render_runtime(target).documents if d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'prometheus-config')
+              folder = Path('.local/ci-monitoring') / kind
+              folder.mkdir(parents=True, exist_ok=True)
+              for name, value in document['data'].items():
+                  (folder / name).write_text(value)
+          PY
+      - name: Validate generated owner monitoring configurations and alert behavior
+        run: |
+          for kind in eks rehearsal; do
+            docker run --rm --network none --entrypoint /bin/promtool --mount "type=bind,source=$PWD/.local/ci-monitoring/$kind,target=/etc/prometheus,readonly" prom/prometheus:v3.15.0 check config --syntax-only /etc/prometheus/prometheus.yaml
+            docker run --rm --network none --entrypoint /bin/promtool --mount "type=bind,source=$PWD/.local/ci-monitoring/$kind,target=/etc/prometheus,readonly" --mount "type=bind,source=$PWD/infra/kubernetes/monitoring/tests,target=/tests,readonly" prom/prometheus:v3.15.0 test rules /tests/iris-alerts.test.yaml
+          done
 
   monitoring:
     name: Monitoring configuration and alert rules

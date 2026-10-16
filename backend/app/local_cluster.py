@@ -5,95 +5,24 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
-CONTEXT = "docker-desktop"
-NAMESPACE = "strawhats-operator-local"
-NAME = "iris"
-IMAGE = "strawhats-iris:local-monitoring"
-GROUP, VERSION, PLURAL = "mlops.strawhats.dev", "v1alpha1", "modeldeployments"
-TIMEOUT = (3, 5)
+from .iris_cluster import GROUP, PLURAL, TIMEOUT, VERSION, IrisCluster  # noqa: F401
+from .iris_target import LOCAL_TARGET
+
+CONTEXT = LOCAL_TARGET.context
+NAMESPACE = LOCAL_TARGET.namespace
+NAME = LOCAL_TARGET.name
+IMAGE = LOCAL_TARGET.image
 
 
-class LocalCluster:
+class LocalCluster(IrisCluster):
     def __init__(self, sdk, custom, apps):
-        self.sdk, self.custom, self.apps = sdk, custom, apps
-
-    def resource(self, *, request_timeout=TIMEOUT):
-        from kubernetes.client.exceptions import ApiException
-
-        try:
-            return self.custom.get_namespaced_custom_object(
-                GROUP,
-                VERSION,
-                NAMESPACE,
-                PLURAL,
-                NAME,
-                _request_timeout=request_timeout,
-            )
-        except ApiException as error:
-            if error.status == 404:
-                return None
-            raise
-
-    def controller_ready(self, *, request_timeout=TIMEOUT) -> bool:
-        from kubernetes.client.exceptions import ApiException
-
-        try:
-            deployment = self.sdk.sanitize_for_serialization(
-                self.apps.read_namespaced_deployment(
-                    "strawhats-model-operator",
-                    NAMESPACE,
-                    _request_timeout=request_timeout,
-                )
-            )
-        except ApiException as error:
-            if error.status == 404:
-                return False
-            raise
-        status = deployment.get("status", {})
-        return status.get("observedGeneration", 0) >= deployment["metadata"].get(
-            "generation", 1
-        ) and all(
-            status.get(field, 0) >= 1
-            for field in ("readyReplicas", "availableReplicas", "updatedReplicas")
-        )
-
-    def apply(self, resource, spec):
-        if resource is None:
-            return self.custom.create_namespaced_custom_object(
-                GROUP,
-                VERSION,
-                NAMESPACE,
-                PLURAL,
-                body={
-                    "apiVersion": f"{GROUP}/{VERSION}",
-                    "kind": "ModelDeployment",
-                    "metadata": {"name": NAME, "namespace": NAMESPACE},
-                    "spec": spec,
-                },
-                _request_timeout=TIMEOUT,
-            )
-        if resource["metadata"].get("deletionTimestamp"):
-            raise HTTPException(409, "Local Iris is being deleted. Refresh and retry.")
-        if all(resource["spec"].get(key) == value for key, value in spec.items()):
-            return resource
-        return self.custom.patch_namespaced_custom_object(
-            GROUP,
-            VERSION,
-            NAMESPACE,
-            PLURAL,
-            NAME,
-            body={
-                "metadata": {
-                    "resourceVersion": resource["metadata"]["resourceVersion"]
-                },
-                "spec": spec,
-            },
-            _request_timeout=TIMEOUT,
+        super().__init__(
+            sdk, custom, apps, target=LOCAL_TARGET, before_mutation=lambda: None
         )
 
 
 @contextmanager
-def connect_local_cluster():
+def connect_local_cluster(*, kubeconfig=None, kubeconfig_data=None, zero_retries=False):
     # Disabled API instances do not need to import the optional Kubernetes SDK.
     try:
         from kubernetes import client, config
@@ -110,11 +39,27 @@ def connect_local_cluster():
         configuration = client.Configuration()
         configuration.proxy = None  # Local cluster traffic must never use a proxy.
         # Refuse redirects before any connection pools cache a retry policy.
-        configuration.retries = Retry(total=3, redirect=0, raise_on_redirect=False)
-        sdk = config.new_client_from_config(
+        configuration.retries = Retry(
+            total=0 if zero_retries else 3, redirect=0, raise_on_redirect=False
+        )
+        if kubeconfig is not None and kubeconfig_data is not None:
+            raise ValueError("Select one Kubernetes configuration source.")
+        loader = (
+            config.new_client_from_config_dict
+            if kubeconfig_data is not None
+            else config.new_client_from_config
+        )
+        sdk = loader(
             context=CONTEXT,
             client_configuration=configuration,
             persist_config=False,
+            **(
+                {"config_dict": kubeconfig_data}
+                if kubeconfig_data is not None
+                else {"config_file": kubeconfig}
+                if kubeconfig is not None
+                else {}
+            ),
         )
         address = urlsplit(sdk.configuration.host)
         if (

@@ -210,9 +210,19 @@ Resources:
       EmptyOnDelete: false
       EncryptionConfiguration: {EncryptionType: AES256}
       Tags: [{Key: Project, Value: StrawHats-MLOps}, {Key: Milestone, Value: one}]
+  OperatorImageRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${ClusterName}/operator'
+      ImageTagMutability: IMMUTABLE
+      EmptyOnDelete: false
+      EncryptionConfiguration: {EncryptionType: AES256}
+      Tags: [{Key: Project, Value: StrawHats-MLOps}, {Key: Milestone, Value: one}]
 Outputs:
   ClusterArn: {Value: !GetAtt Cluster.Arn}
   ClusterName: {Value: !Ref Cluster}
   RepositoryUri: {Value: !GetAtt ImageRepository.RepositoryUri}
   RepositoryName: {Value: !Ref ImageRepository}
   VpcId: {Value: !Ref Vpc}
+  OperatorRepositoryUri: {Value: !GetAtt OperatorImageRepository.RepositoryUri}
+  OperatorRepositoryName: {Value: !Ref OperatorImageRepository}

@@ -7,7 +7,8 @@ from typing import Annotated, Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from .local_cluster import GROUP, NAME, NAMESPACE, TIMEOUT, VERSION
+from .iris_target import LOCAL_TARGET, RuntimeTarget
+from .local_cluster import GROUP, TIMEOUT, VERSION
 
 Measurement = Annotated[float, Field(gt=0, le=30, allow_inf_nan=False, strict=True)]
 Probability = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False, strict=True)]
@@ -46,15 +47,21 @@ def predict_with_service(
     *,
     before_request: Callable[[], None] | None = None,
     request_timeout=TIMEOUT,
+    target: RuntimeTarget = LOCAL_TARGET,
 ) -> dict:
     from kubernetes import client
 
+    if (
+        resource.get("metadata", {}).get("namespace") != target.namespace
+        or resource.get("metadata", {}).get("name") != target.name
+    ):
+        raise HTTPException(409, "Iris identity does not match this runtime.")
     if before_request:
         before_request()
     service = cluster.sdk.sanitize_for_serialization(
         client.CoreV1Api(cluster.sdk).read_namespaced_service(
-            NAME,
-            NAMESPACE,
+            target.name,
+            target.namespace,
             _request_timeout=request_timeout()
             if callable(request_timeout)
             else request_timeout,
@@ -65,7 +72,7 @@ def predict_with_service(
     owned = any(
         owner.get("uid") == uid
         and owner.get("kind") == "ModelDeployment"
-        and owner.get("name") == NAME
+        and owner.get("name") == target.name
         and owner.get("apiVersion") == f"{GROUP}/{VERSION}"
         and owner.get("controller") is True
         for owner in service.get("metadata", {}).get("ownerReferences", [])
@@ -93,8 +100,8 @@ def predict_with_service(
             "/api/v1/namespaces/{namespace}/services/{name}/proxy/{path}",
             "POST",
             path_params={
-                "namespace": NAMESPACE,
-                "name": f"{NAME}:8000",
+                "namespace": target.namespace,
+                "name": f"{target.name}:8000",
                 "path": "predict",
             },
             header_params={
