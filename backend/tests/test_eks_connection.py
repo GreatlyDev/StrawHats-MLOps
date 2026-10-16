@@ -303,6 +303,16 @@ def open_connection(eks, release, **kwargs):
     )
 
 
+def test_exact_windows_aws_helper_is_accepted_as_transport_metadata(eks, release):
+    release.config["users"][0]["user"]["exec"]["command"] = "aws.exe"
+    from pathlib import Path
+
+    Path(release.receipt.kubeconfig).write_text(yaml.safe_dump(release.config))
+    with open_connection(eks, release) as connection:
+        assert connection.target.kind == "eks"
+    assert release.tokens == 1
+
+
 def test_verified_connection_is_isolated_and_uses_zero_write_retries(eks, release):
     before = fingerprint(
         {

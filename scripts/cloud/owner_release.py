@@ -4,6 +4,7 @@ import argparse
 import base64
 import hashlib
 import json
+import shutil
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -113,7 +114,7 @@ def prepare_receipt(cloud, images: ReleaseImages) -> RuntimeReceipt:
                 "user": {
                     "exec": {
                         "apiVersion": "client.authentication.k8s.io/v1beta1",
-                        "command": "aws",
+                        "command": "aws.exe" if shutil.which("aws.exe") else "aws",
                         "args": [
                             "--region",
                             "us-east-1",

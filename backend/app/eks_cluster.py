@@ -145,6 +145,10 @@ def kube_metadata(receipt):
             }
         ],
     }
+    helper = value["users"][0]["user"]["exec"]["command"]
+    if helper not in ("aws", "aws.exe"):
+        raise ValueError("Only the controlled AWS CLI helper is permitted.")
+    expected["users"][0]["user"]["exec"]["command"] = helper
     encoded = value["clusters"][0]["cluster"]["certificate-authority-data"]
     expected["clusters"][0]["cluster"]["certificate-authority-data"] = encoded
     if value != expected:

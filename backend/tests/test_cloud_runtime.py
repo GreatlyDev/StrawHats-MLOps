@@ -95,7 +95,11 @@ def connection(runtime, rehearsal, tmp_path):
                 d
                 for d in self.data.values()
                 if d["metadata"].get("namespace") == namespace
-            ] + self.foreign_children
+            ] + [
+                d
+                for d in self.foreign_children
+                if d["metadata"].get("namespace") == namespace
+            ]
 
     value = SimpleNamespace(
         target=rehearsal,

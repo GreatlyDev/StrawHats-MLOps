@@ -2,7 +2,7 @@
 
 **COSC 472 · Group 12 · Straw Hats**
 
-A model operations dashboard for registering ML models, testing inference, preparing Kubernetes deployment configuration, and asking for deployment guidance through LangChain. This repository is the first local foundation of the group's ML Deployment Orchestrator.
+A model operations dashboard for registering ML models, testing inference, preparing Kubernetes deployment configuration, and asking for deployment guidance through LangChain. The owner workspace connects the group's ML Deployment Orchestrator to a verified Kubernetes runtime.
 
 **Live demo:** [strawhats-mlops.vercel.app](https://strawhats-mlops.vercel.app)
 

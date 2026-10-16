@@ -142,7 +142,7 @@ python -m scripts.cloud.adjust_iris --target eks --profile strawhats --account <
 ```
 
 Adjustment defaults to preview and uses the existing server-only key. It offers
-Hold or one bounded CPU/memory ladder step, preserves 1–2 replicas, enforces fresh
+Hold or one bounded CPU/memory ladder step, preserves 1â€“2 replicas, enforces fresh
 telemetry and a five-minute cooldown, and verifies the exact accepted revision
 and real prediction. Failed known rollouts permit one guarded restoration with
 its own 180-second deadline. Unknown write outcomes never retry blindly. A
@@ -162,7 +162,12 @@ python -m scripts.cloud.rehearse verify --receipt .local/owner-eks/rehearsal/run
 python -m scripts.cloud.rehearse cleanup --receipt .local/owner-eks/rehearsal/runtime.json
 ```
 
-For WSL, use Linux Python3.12 and pass the existing Windows kubeconfig as
+For WSL, use Linux Python3.12 and a matching Linux kubectl on PATH so monitoring
+forwards share the Python network namespace. Keep the Windows Docker CLI bridge;
+Windows-hosted forward listeners may be unavailable to Linux loopback clients.
+Generated EKS metadata uses the exact `aws.exe` helper when installed, or `aws`
+otherwise; custom commands/arguments remain rejected. Pass the existing Windows
+kubeconfig as
 `--kubeconfig /mnt/c/Users/<USER>/.kube/config` to `prepare`. It reads certificate
 authentication without copying credentials. WSL can resolve Windows `aws.exe`;
 the version bridge was checked without sign-in or an AWS endpoint call. Use one
@@ -173,6 +178,20 @@ Cleanup uses recorded UIDs and refuses foreign children in owned namespaces.
 Inspect the partial receipt after any failure; do not reset Kubernetes or delete
 namespaces manually to get around an ownership failure. Local acceptance and
 controlled provider tests do not establish live EKS or live AI acceptance.
+
+### Verified local acceptance (October 16, 2026)
+
+A clean source release `4dd2ff36d67c6f61b6287d17563ef820b2e818eb` was built/imported
+and installed into the dedicated local namespaces. Iris reached one ready replica,
+served a real prediction, scaled to two, and completed latest-snapshot rollback
+at generation 3. The private browser panel showed actual provenance; workspace
+prediction totals stayed unchanged. Desktop and 390px mobile layouts were checked.
+
+Prometheus/Grafana and metrics-server returned real readings. A bounded 380-request
+Service demo verified inactive, firing and recovered warning states. UID-checked
+cleanup removed both rehearsal namespaces. Original local namespaces, Pods and
+Iris UIDs, plus all 10 borrowed CRD/addon objects, were preserved. No AWS endpoint
+or live OpenAI request was used; live cloud and AI acceptance remain pending.
 
 ## Explicit cleanup
 

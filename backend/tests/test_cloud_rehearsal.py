@@ -198,6 +198,144 @@ def test_imported_oci_index_is_bound_to_the_runtime_config(
         command.verify_imported("desktop-control-plane", "image:tag", index)
 
 
+def test_cleanup_discovery_lists_real_resources_once_and_skips_sdk_list_wrappers(
+    runtime,
+):
+    from kubernetes.dynamic.resource import ResourceList
+
+    calls = []
+    child = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {"name": "owned", "namespace": "strawhats", "uid": "owned-pod"},
+    }
+
+    def get(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(to_dict=lambda: {"items": [child]})
+
+    actual = SimpleNamespace(name="pods", kind="Pod", verbs=["list"], group="", get=get)
+    wrapper = ResourceList(
+        SimpleNamespace(resources=SimpleNamespace(get=lambda **kwargs: actual)),
+        base_kind="Pod",
+    )
+    objects = object.__new__(runtime.install.RuntimeObjects)
+    objects.dynamic = SimpleNamespace(
+        resources=SimpleNamespace(search=lambda **kwargs: [wrapper, actual])
+    )
+    assert objects.children("strawhats") == [child]
+    assert calls == [{"namespace": "strawhats", "_request_timeout": 5}]
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_cleanup_recognizes_only_legacy_endpoints_for_owned_service_pods(
+    runtime, connection, tmp_path, foreign
+):
+    receipt = runtime.install.install_runtime(
+        connection,
+        runtime.manifests.render_runtime(connection.target),
+        evidence_dir=tmp_path,
+    )
+    deployment = next(
+        r
+        for r in receipt.inventory
+        if r.kind == "Deployment" and r.name == "prometheus"
+    )
+    pod = {
+        "kind": "Pod",
+        "metadata": {
+            "namespace": "strawhats-monitoring",
+            "name": "prometheus-pod",
+            "uid": "owned-pod",
+            "labels": {"app": "strawhats-prometheus"},
+            "ownerReferences": [{"uid": deployment.uid, "controller": True}],
+        },
+    }
+    endpoints = {
+        "kind": "Endpoints",
+        "metadata": {
+            "namespace": "strawhats-monitoring",
+            "name": "prometheus",
+            "uid": "automatic-endpoints",
+            "labels": {"endpoints.kubernetes.io/managed-by": "endpoint-controller"},
+        },
+        "subsets": [
+            {
+                "addresses": [
+                    {
+                        "ip": "10.0.0.1",
+                        "targetRef": {
+                            "kind": "Pod",
+                            "namespace": "strawhats-monitoring",
+                            "name": "prometheus-pod",
+                            "uid": "foreign-pod" if foreign else "owned-pod",
+                        },
+                    }
+                ]
+            }
+        ],
+    }
+    connection.kube.foreign_children = [pod, endpoints]
+    delete = connection.kube.delete
+
+    def delete_with_service_gc(record):
+        delete(record)
+        if record.kind == "Service":
+            connection.kube.foreign_children = [
+                d
+                for d in connection.kube.foreign_children
+                if not (
+                    d["kind"] == "Endpoints"
+                    and d["metadata"]["namespace"] == record.namespace
+                    and d["metadata"]["name"] == record.name
+                )
+            ]
+
+    connection.kube.delete = delete_with_service_gc
+    connection.purpose = "cleanup"
+    if foreign:
+        with pytest.raises(RuntimeError, match="foreign"):
+            runtime.install.remove_runtime(connection, receipt)
+        assert connection.kube.deleted == []
+    else:
+        assert runtime.install.remove_runtime(connection, receipt)["removed"]
+
+
+@pytest.mark.parametrize("system", [False, True])
+def test_cleanup_after_restart_handles_only_system_events_for_deleted_pods(
+    runtime, connection, tmp_path, system
+):
+    receipt = runtime.install.install_runtime(
+        connection,
+        runtime.manifests.render_runtime(connection.target),
+        evidence_dir=tmp_path,
+    )
+    connection.kube.foreign_children = [
+        {
+            "kind": "Event",
+            "metadata": {
+                "name": "old-pod.started",
+                "namespace": "strawhats",
+                "uid": "event-uid",
+            },
+            "reportingComponent": "kubelet" if system else "foreign-producer",
+            "involvedObject": {
+                "kind": "Pod",
+                "namespace": "strawhats",
+                "name": "old-pod",
+                "uid": "deleted-pod-uid",
+            },
+        }
+    ]
+    connection.purpose = "cleanup"
+    if system:
+        assert runtime.install.remove_runtime(connection, receipt)["removed"]
+    else:
+        with pytest.raises(RuntimeError, match="foreign"):
+            runtime.install.remove_runtime(connection, receipt)
+        assert connection.kube.deleted == []
+
+
 @pytest.mark.parametrize("crashed", [False, True])
 def test_only_owned_forwards_are_stopped_and_crashes_reject_reads(
     forwards, connection, monkeypatch, crashed

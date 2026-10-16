@@ -8,6 +8,7 @@ from dataclasses import replace
 from kubernetes import client, dynamic
 from kubernetes.client.exceptions import ApiException
 from kubernetes.dynamic.exceptions import ResourceNotFoundError
+from kubernetes.dynamic.resource import ResourceList
 from kubernetes.utils.quantity import parse_quantity
 
 from .runtime_contract import ObjectRecord, fingerprint
@@ -221,6 +222,56 @@ def _check_inventory(connection, receipt, *, require_present=False):
             raise RuntimeError("Runtime object UID changed; no deletion attempted.")
 
 
+def _automatic_endpoints(child, children, known):
+    """The legacy endpoint controller omits Service ownerReferences."""
+    meta = child["metadata"]
+    if (
+        child["kind"] != "Endpoints"
+        or meta.get("labels", {}).get("endpoints.kubernetes.io/managed-by")
+        != "endpoint-controller"
+    ):
+        return False
+    service = next(
+        (
+            d
+            for d in children
+            if d["kind"] == "Service"
+            and d["metadata"].get("uid") in known
+            and d["metadata"].get("namespace") == meta.get("namespace")
+            and d["metadata"]["name"] == meta["name"]
+        ),
+        None,
+    )
+    selector = (service or {}).get("spec", {}).get("selector", {})
+    if not selector:
+        return False
+    pods = {
+        d["metadata"]["uid"]: d
+        for d in children
+        if d["kind"] == "Pod"
+        and d["metadata"].get("uid") in known
+        and d["metadata"].get("namespace") == meta.get("namespace")
+        and all(
+            d["metadata"].get("labels", {}).get(k) == v for k, v in selector.items()
+        )
+    }
+    for subset in child.get("subsets", []):
+        for address in (
+            *subset.get("addresses", []),
+            *subset.get("notReadyAddresses", []),
+        ):
+            ref = address.get("targetRef", {})
+            pod = pods.get(ref.get("uid"))
+            if (
+                not pod
+                or ref.get("kind") != "Pod"
+                or ref.get("namespace") != meta.get("namespace")
+                or ref.get("name") != pod["metadata"]["name"]
+            ):
+                return False
+    return True
+
+
 def _check_children(connection, receipt):
     known = {r.uid for r in receipt.inventory}
     for namespace in (
@@ -256,11 +307,46 @@ def _check_children(connection, receipt):
                     ).hexdigest()
                     == receipt.ca_sha256
                 )
-            event = child["kind"] == "Event" and (
-                child.get("involvedObject", child.get("regarding", {})).get("uid")
-                in known
+            related = child.get("involvedObject") or child.get("regarding") or {}
+            reporter = (
+                child.get("reportingComponent")
+                or child.get("reportingController")
+                or child.get("source", {}).get("component")
             )
-            if meta.get("uid") not in known and not default and not event:
+            # Kubernetes retains these short-lived records after their Pods/RS
+            # disappear, including across a resumed cleanup. Durable foreign
+            # objects still block namespace deletion independently.
+            system_event = (
+                related.get("namespace") == namespace
+                and related.get("kind")
+                in (
+                    "Pod",
+                    "ReplicaSet",
+                    "Deployment",
+                    "Service",
+                    "Endpoints",
+                    "EndpointSlice",
+                )
+                and reporter
+                in (
+                    "kubelet",
+                    "default-scheduler",
+                    "deployment-controller",
+                    "replicaset-controller",
+                    "endpoint-controller",
+                    "endpointslice-controller",
+                )
+            )
+            event = child["kind"] == "Event" and (
+                related.get("uid") in known or system_event
+            )
+            automatic_endpoints = _automatic_endpoints(child, children, known)
+            if (
+                meta.get("uid") not in known
+                and not default
+                and not event
+                and not automatic_endpoints
+            ):
                 raise RuntimeError("A foreign namespace child blocks cleanup.")
 
 
@@ -469,7 +555,8 @@ class RuntimeObjects:
         children = []
         for api in self.dynamic.resources.search(namespaced=True):
             if (
-                "/" in api.name
+                isinstance(api, ResourceList)
+                or "/" in api.name
                 or "list" not in api.verbs
                 or api.group == "metrics.k8s.io"
             ):
