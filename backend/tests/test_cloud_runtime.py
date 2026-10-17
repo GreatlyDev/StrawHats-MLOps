@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from backend.tests.test_iris_targets import rehearsal as rehearsal
 from backend.tests.test_iris_targets import targets as targets
@@ -171,6 +172,41 @@ def test_cloud_render_never_inherits_local_metrics_tls_exception(
         controller["spec"]["template"]["spec"]["containers"][0]["image"]
         == eks.operator_image
     )
+
+
+@pytest.mark.parametrize("kind", ["eks", "rehearsal"])
+def test_grafana_datasource_rebinds_url_and_preserves_other_settings(
+    runtime, rehearsal, kind
+):
+    target = rehearsal
+    if kind == "eks":
+        registry = "123456789012.dkr.ecr.us-east-1.amazonaws.com/strawhats-midterm/"
+        target = replace(
+            rehearsal,
+            kind="eks",
+            context="arn:aws:eks:us-east-1:123456789012:cluster/strawhats-midterm",
+            image=registry + "iris@sha256:" + "a" * 64,
+            operator_image=registry + "operator@sha256:" + "b" * 64,
+            image_pull_policy="IfNotPresent",
+        )
+    source = runtime.manifests.BASE / "monitoring/configs/datasources.yaml"
+    original = source.read_bytes()
+    expected = yaml.safe_load(original)
+    expected["datasources"][0]["url"] = (
+        "http://prometheus.strawhats-monitoring.svc:9090"
+    )
+
+    bundle = runtime.manifests.render_runtime(target)
+    config = next(
+        doc
+        for doc in bundle.documents
+        if doc["kind"] == "ConfigMap"
+        and doc["metadata"]["name"] == "grafana-datasource"
+    )
+
+    assert config["metadata"]["namespace"] == "strawhats-monitoring"
+    assert yaml.safe_load(config["data"]["datasources.yaml"]) == expected
+    assert source.read_bytes() == original
 
 
 def test_install_records_every_uid_but_does_not_claim_ready(
