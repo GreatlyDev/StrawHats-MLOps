@@ -44,7 +44,7 @@ def provider(advisor, monkeypatch):
                 json={
                     "error": {
                         "message": "private-provider-detail",
-                        "type": "provider_error",
+                        "type": outcome.get("type", "provider_error"),
                         "code": outcome.get("code"),
                     }
                 },
@@ -167,6 +167,30 @@ def test_invalid_provider_output_is_unavailable(
     [
         ({"status": 401}, "credentials"),
         ({"status": 429, "code": "insufficient_quota"}, "credits"),
+        (
+            {
+                "status": 429,
+                "code": "credit_balance_exhausted",
+                "type": "insufficient_quota",
+            },
+            "credit balance",
+        ),
+        (
+            {"status": 429, "code": "project_spend_limit_exceeded"},
+            "project spend limit",
+        ),
+        (
+            {"status": 429, "code": "organization_spend_limit_exceeded"},
+            "organization spend limit",
+        ),
+        (
+            {"status": 429, "code": "organization_usage_limit_exceeded"},
+            "organization usage limit",
+        ),
+        (
+            {"status": 429, "code": "unknown_quota", "type": "insufficient_quota"},
+            "credits",
+        ),
         ({"status": 429, "code": "rate_limit_exceeded"}, "rate"),
         ({"status": 500}, "provider"),
         ({"timeout": True}, "provider"),
