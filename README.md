@@ -319,6 +319,11 @@ configuration; the command's evidence retains the pre-adjustment settings.
 Local automated acceptance covers policy thresholds, real LangChain request
 serialization, concurrency conflicts, invalid/stale observations, bounded waits,
 failed rollouts and guarded restoration through controlled external transports.
+The OpenAI SDK reports temporary throttling and billing or allowance failures as
+HTTP 429. The command distinguishes exhausted credits and project or organization
+limits using static, sanitized messages and zero automatic provider retries.
+See the [OpenAI error-code documentation](https://developers.openai.com/api/docs/guides/error-codes).
+
 Earlier live attempts were rejected before applying a change. On October 17,
 after provider access and local connectivity were restored, one genuine call
 selected CPU 250m → 100m on the original Docker Desktop Iris resource. Generation
