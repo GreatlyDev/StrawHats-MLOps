@@ -117,7 +117,17 @@ def recommend(
             "OpenAI rejected the server credentials."
         ) from None
     except RateLimitError as error:
-        if error.code == "insufficient_quota":
+        # The SDK raises RateLimitError for billing/allowance failures too.
+        limits = {
+            "credit_balance_exhausted": "OpenAI API credit balance is exhausted; add API credits before retrying.",
+            "project_spend_limit_exceeded": "OpenAI project spend limit reached; review the project's API limit before retrying.",
+            "organization_spend_limit_exceeded": "OpenAI organization spend limit reached; review the organization's API limit before retrying.",
+            "organization_usage_limit_exceeded": "OpenAI organization usage limit reached; review the organization's API allowance before retrying.",
+        }
+        code = error.code if isinstance(error.code, str) else None
+        if code in limits:
+            raise RecommendationUnavailable(limits[code]) from None
+        if code == "insufficient_quota" or error.type == "insufficient_quota":
             raise RecommendationUnavailable(
                 "OpenAI API credits or project allowance are exhausted."
             ) from None

@@ -274,12 +274,15 @@ configuration; the command's evidence retains the pre-adjustment settings.
 Local automated acceptance covers policy thresholds, real LangChain request
 serialization, concurrency conflicts, invalid/stale observations, bounded waits,
 failed rollouts and guarded restoration through controlled external transports.
-On October 15, 2026, 60 genuine balanced Service predictions produced healthy
-two-pod telemetry and an eligible CPU decrease from 250m to 100m. The single live
-OpenAI preview request was rate-limited, so no adjustment was applied and no second
-provider call was made. **Live AI-selected adjustment/readiness acceptance remains
-pending.** Restoration/conflict behavior is verified in automated transport tests,
-not by deliberately breaking the running cluster. The public dashboard remains
+On October 15 and 16, 2026, genuine balanced Service predictions produced healthy
+two-pod telemetry and an eligible CPU decrease from 250m to 100m. Both live
+acceptance attempts were rejected before any adjustment. The provider's SDK
+reports billing failures as HTTP 429 too. The command distinguishes exhausted
+credits and project or organization limits from temporary rate limiting, without
+exposing provider details or retrying. See the [OpenAI error-code documentation](https://developers.openai.com/api/docs/guides/error-codes).
+**Live AI-selected adjustment/readiness acceptance remains pending until provider
+access is available.** Restoration/conflict behavior is verified in automated
+transport tests, not by deliberately breaking the running cluster. The public dashboard remains
 independent of this provider and local cluster.
 
 Build from the repository root after starting Docker:
