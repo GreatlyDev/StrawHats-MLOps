@@ -524,6 +524,8 @@ class RuntimeObjects:
         doc = record.document()
         current = self.get(doc)
         if current is None:
+            if record.kind == "CustomResourceDefinition":
+                self.dynamic.resources.invalidate_cache()
             return
         if current["metadata"].get("uid") != record.uid:
             raise RuntimeError("Deletion UID changed.")
@@ -545,6 +547,8 @@ class RuntimeObjects:
         while time.monotonic() < deadline:
             current = self.get(doc)
             if current is None:
+                if record.kind == "CustomResourceDefinition":
+                    self.dynamic.resources.invalidate_cache()
                 return
             if current["metadata"].get("uid") != record.uid:
                 raise RuntimeError("An object was recreated during cleanup.")
@@ -619,6 +623,9 @@ class RuntimeObjects:
         return resource.get(_request_timeout=5).to_dict().get("items", [])
 
     def children(self, namespace):
+        # The SDK persists discovery across processes, including removed CRDs.
+        # Refresh before the initial guard as well as resumed namespace checks.
+        self.dynamic.resources.invalidate_cache()
         children = []
         for api in self.dynamic.resources.search(namespaced=True):
             if (

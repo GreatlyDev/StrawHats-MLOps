@@ -555,6 +555,186 @@ def test_delete_rechecks_guard_after_its_uid_read(runtime):
     assert calls == []
 
 
+@pytest.fixture
+def discovery_objects(runtime, monkeypatch, tmp_path):
+    """Use the real persistent SDK discovery cache with an offline API boundary."""
+    from kubernetes import client, dynamic
+    from kubernetes.client.exceptions import ApiException
+
+    group = "mlops.strawhats.dev"
+    crd_name = "modeldeployments." + group
+    crd_path = "/apis/apiextensions.k8s.io/v1/customresourcedefinitions/" + crd_name
+    server = SimpleNamespace(crd_present=True, deleted=[], children=[], list_error=None)
+    crd = {
+        "apiVersion": "apiextensions.k8s.io/v1",
+        "kind": "CustomResourceDefinition",
+        "metadata": {"name": crd_name, "uid": "captured"},
+    }
+
+    def description(name, kind, namespaced):
+        return {
+            "name": name,
+            "kind": kind,
+            "namespaced": namespaced,
+            "verbs": ["get", "list", "delete"],
+        }
+
+    def call_api(path, method, *args, **kwargs):
+        if path == "/version":
+            value = {"gitVersion": "v1.35.0"}
+        elif path == "/apis":
+            groups = [("apiextensions.k8s.io", "v1")]
+            if server.crd_present:
+                groups.append((group, "v1alpha1"))
+            value = {
+                "kind": "APIGroupList",
+                "apiVersion": "v1",
+                "groups": [
+                    {
+                        "name": name,
+                        "versions": [{"groupVersion": f"{name}/{v}", "version": v}],
+                        "preferredVersion": {
+                            "groupVersion": f"{name}/{v}",
+                            "version": v,
+                        },
+                    }
+                    for name, v in groups
+                ],
+            }
+        elif path == "/api/v1":
+            value = {
+                "kind": "APIResourceList",
+                "apiVersion": "v1",
+                "groupVersion": "v1",
+                "resources": [description("configmaps", "ConfigMap", True)],
+            }
+        elif path == "/apis/apiextensions.k8s.io/v1":
+            value = {
+                "kind": "APIResourceList",
+                "apiVersion": "v1",
+                "groupVersion": "apiextensions.k8s.io/v1",
+                "resources": [
+                    description(
+                        "customresourcedefinitions", "CustomResourceDefinition", False
+                    )
+                ],
+            }
+        elif path == crd_path:
+            if not server.crd_present:
+                raise ApiException(404)
+            if method == "DELETE":
+                assert kwargs["body"]["preconditions"] == {"uid": "captured"}
+                server.deleted.append("captured")
+                server.crd_present = False
+                value = {"kind": "Status", "status": "Success"}
+            else:
+                assert method == "GET"
+                value = crd
+        elif path.startswith(f"/apis/{group}/v1alpha1"):
+            if not server.crd_present:
+                raise ApiException(404)
+            value = (
+                {
+                    "kind": "APIResourceList",
+                    "apiVersion": "v1",
+                    "groupVersion": f"{group}/v1alpha1",
+                    "resources": [
+                        description("modeldeployments", "ModelDeployment", True)
+                    ],
+                }
+                if path == f"/apis/{group}/v1alpha1"
+                else {
+                    "kind": "ModelDeploymentList",
+                    "apiVersion": f"{group}/v1alpha1",
+                    "items": [],
+                }
+            )
+        elif path == "/api/v1/namespaces/strawhats/configmaps":
+            if server.list_error:
+                raise ApiException(server.list_error)
+            value = {
+                "kind": "ConfigMapList",
+                "apiVersion": "v1",
+                "items": server.children,
+            }
+        else:
+            pytest.fail(f"Unexpected offline Kubernetes request: {method} {path}")
+        return SimpleNamespace(data=json.dumps(value).encode())
+
+    sdk = client.ApiClient(client.Configuration(host="https://cleanup.invalid"))
+    monkeypatch.setattr(sdk, "call_api", call_api)
+    dynamic_client = dynamic.DynamicClient
+    monkeypatch.setattr(
+        runtime.install.dynamic,
+        "DynamicClient",
+        lambda sdk: dynamic_client(sdk, cache_file=str(tmp_path / "discovery.json")),
+    )
+
+    def make():
+        return runtime.install.RuntimeObjects(sdk)
+
+    objects = make()
+    # Populate the SDK's persisted cache while the custom API still exists.
+    assert any(
+        resource.kind == "ModelDeployment"
+        for resource in objects.dynamic.resources.search(namespaced=True)
+    )
+    return SimpleNamespace(server=server, crd=crd, objects=objects, make=make)
+
+
+@pytest.mark.parametrize("already_absent", [False, True])
+def test_crd_cleanup_refreshes_persisted_discovery(
+    runtime, discovery_objects, already_absent
+):
+    api = discovery_objects
+    api.server.crd_present = not already_absent
+    record = runtime.contract.ObjectRecord(
+        "apiextensions.k8s.io/v1",
+        "CustomResourceDefinition",
+        "",
+        "modeldeployments.mlops.strawhats.dev",
+        "captured",
+        "created",
+        "a" * 64,
+    )
+
+    api.objects.delete(record)
+
+    # A new client must not inherit an API that this cleanup confirmed removed.
+    assert not any(
+        resource.kind == "ModelDeployment"
+        for resource in api.make().dynamic.resources.search(namespaced=True)
+    )
+    assert api.server.deleted == ([] if already_absent else ["captured"])
+
+
+def test_namespace_children_refreshes_persisted_discovery(discovery_objects):
+    api = discovery_objects
+    api.server.crd_present = False
+    api.server.children = [
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {"namespace": "strawhats", "name": "foreign", "uid": "foreign"},
+        }
+    ]
+
+    assert api.make().children("strawhats") == api.server.children
+
+
+@pytest.mark.parametrize("status", [403, 404, 429])
+def test_namespace_children_propagates_current_api_errors(discovery_objects, status):
+    from kubernetes.client.exceptions import ApiException
+
+    api = discovery_objects
+    api.server.crd_present = False
+    api.server.list_error = status
+
+    with pytest.raises(ApiException) as result:
+        api.make().children("strawhats")
+    assert result.value.status == status
+
+
 @pytest.mark.parametrize("late", [False, True])
 def test_created_crd_cleanup_preserves_foreign_instances_cluster_wide(
     runtime, connection, tmp_path, late
