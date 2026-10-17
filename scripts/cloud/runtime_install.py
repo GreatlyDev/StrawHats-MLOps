@@ -635,9 +635,24 @@ class RuntimeObjects:
                 or api.group == "metrics.k8s.io"
             ):
                 continue
-            children.extend(
-                api.get(namespace=namespace, _request_timeout=5)
-                .to_dict()
-                .get("items", [])
-            )
+            for attempt in range(3):
+                try:
+                    response = api.get(namespace=namespace, _request_timeout=5)
+                except ApiException as error:
+                    if error.status != 429 or attempt == 2:
+                        raise
+                    retry_after = next(
+                        (
+                            value
+                            for name, value in (error.headers or {}).items()
+                            if name.lower() == "retry-after"
+                        ),
+                        None,
+                    )
+                    if retry_after not in ("1", "2", "3", "4", "5"):
+                        raise
+                    time.sleep(int(retry_after))
+                else:
+                    children.extend(response.to_dict().get("items", []))
+                    break
         return children

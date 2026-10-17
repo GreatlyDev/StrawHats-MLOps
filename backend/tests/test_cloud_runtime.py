@@ -564,7 +564,14 @@ def discovery_objects(runtime, monkeypatch, tmp_path):
     group = "mlops.strawhats.dev"
     crd_name = "modeldeployments." + group
     crd_path = "/apis/apiextensions.k8s.io/v1/customresourcedefinitions/" + crd_name
-    server = SimpleNamespace(crd_present=True, deleted=[], children=[], list_error=None)
+    server = SimpleNamespace(
+        crd_present=True,
+        deleted=[],
+        children=[],
+        list_error=None,
+        list_errors=[],
+        list_calls=0,
+    )
     crd = {
         "apiVersion": "apiextensions.k8s.io/v1",
         "kind": "CustomResourceDefinition",
@@ -650,6 +657,12 @@ def discovery_objects(runtime, monkeypatch, tmp_path):
                 }
             )
         elif path == "/api/v1/namespaces/strawhats/configmaps":
+            server.list_calls += 1
+            if server.list_errors:
+                status, headers = server.list_errors.pop(0)
+                error = ApiException(status)
+                error.headers = headers
+                raise error
             if server.list_error:
                 raise ApiException(server.list_error)
             value = {
@@ -733,6 +746,87 @@ def test_namespace_children_propagates_current_api_errors(discovery_objects, sta
     with pytest.raises(ApiException) as result:
         api.make().children("strawhats")
     assert result.value.status == status
+
+
+@pytest.mark.parametrize("header", ["Retry-After", "retry-after", "rEtRy-AfTeR"])
+@pytest.mark.parametrize("failures,delay", [(1, "1"), (2, "5")])
+def test_namespace_children_retries_short_throttling_without_losing_foreign_child(
+    runtime, discovery_objects, monkeypatch, header, failures, delay
+):
+    api = discovery_objects
+    api.server.crd_present = False
+    foreign = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"namespace": "strawhats", "name": "foreign", "uid": "foreign"},
+    }
+    api.server.children = [foreign]
+    api.server.list_errors = [(429, {header: delay}) for _ in range(failures)]
+    waits = []
+    monkeypatch.setattr(runtime.install.time, "sleep", waits.append)
+
+    assert api.make().children("strawhats") == [foreign]
+    assert api.server.list_calls == failures + 1
+    assert waits == [int(delay)] * failures
+
+
+def test_namespace_children_stops_after_three_throttled_attempts(
+    runtime, discovery_objects, monkeypatch
+):
+    from kubernetes.client.exceptions import ApiException
+
+    api = discovery_objects
+    api.server.crd_present = False
+    api.server.list_errors = [(429, {"Retry-After": "1"}) for _ in range(4)]
+    waits = []
+    monkeypatch.setattr(runtime.install.time, "sleep", waits.append)
+
+    with pytest.raises(ApiException) as result:
+        api.make().children("strawhats")
+    assert result.value.status == 429
+    assert api.server.list_calls == 3
+    assert waits == [1, 1]
+
+
+@pytest.mark.parametrize(
+    "status,headers",
+    [
+        (403, {"Retry-After": "1"}),
+        (404, {"Retry-After": "1"}),
+        (429, None),
+        (429, {}),
+        *[
+            (429, {"Retry-After": value})
+            for value in (
+                "0",
+                "6",
+                "1.0",
+                "-1",
+                "abc",
+                "1 ",
+                "Sat, 17 Oct 2026 20:00:00 GMT",
+                None,
+                1,
+            )
+        ],
+    ],
+)
+def test_namespace_children_never_retries_other_or_invalid_throttling(
+    runtime, discovery_objects, monkeypatch, status, headers
+):
+    from kubernetes.client.exceptions import ApiException
+
+    api = discovery_objects
+    api.server.crd_present = False
+    api.server.list_errors = [(status, headers)]
+    waits = []
+    monkeypatch.setattr(runtime.install.time, "sleep", waits.append)
+
+    with pytest.raises(ApiException) as result:
+        api.make().children("strawhats")
+    assert result.value.status == status
+    assert api.server.list_calls == 1
+    assert waits == []
 
 
 @pytest.mark.parametrize("late", [False, True])
