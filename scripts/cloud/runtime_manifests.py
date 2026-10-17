@@ -89,6 +89,10 @@ def render_runtime(target: RuntimeTarget) -> RenderedRuntime:
     prometheus["scrape_configs"][0]["kubernetes_sd_configs"][0]["namespaces"][
         "names"
     ] = [target.namespace]
+    datasources = yaml.safe_load((configs / "datasources.yaml").read_text())
+    next(d for d in datasources["datasources"] if d["uid"] == "local-prometheus")[
+        "url"
+    ] = f"http://prometheus.{target.monitoring_namespace}.svc:9090"
     dashboard = json.loads(
         (configs / "iris-dashboard.json").read_text(encoding="utf-8")
     )
@@ -106,7 +110,7 @@ def render_runtime(target: RuntimeTarget) -> RenderedRuntime:
             "iris-alerts.yaml": (configs / "iris-alerts.yaml").read_text(),
         },
         "grafana-datasource": {
-            "datasources.yaml": (configs / "datasources.yaml").read_text()
+            "datasources.yaml": yaml.safe_dump(datasources, sort_keys=False)
         },
         "grafana-provider": {
             "dashboards.yaml": (configs / "dashboards.yaml").read_text()

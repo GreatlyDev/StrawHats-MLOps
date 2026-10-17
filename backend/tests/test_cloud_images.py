@@ -230,12 +230,27 @@ def test_publication_rejects_changed_binding_after_slow_checks(images, release, 
 @pytest.mark.parametrize("foreign", [False, True])
 def test_cleanup_empties_only_the_two_matching_repository_ids(images, foreign):
     calls = []
+    deleted = set()
 
     def aws(*argv):
         calls.append(argv)
+        if argv[:2] == ("ecr", "describe-images"):
+            return {
+                "imageDetails": [
+                    {
+                        "imageDigest": "sha256:" + "a" * 64,
+                        "imageManifestMediaType": "application/vnd.oci.image.manifest.v1+json",
+                    }
+                ]
+            }
         if argv[:2] == ("ecr", "list-images"):
-            return {"imageIds": [{"imageDigest": "sha256:" + "a" * 64}]}
+            return {
+                "imageIds": []
+                if argv[3] in deleted
+                else [{"imageDigest": "sha256:" + "a" * 64}]
+            }
         if argv[:2] == ("ecr", "batch-delete-image"):
+            deleted.add(argv[3])
             return {"imageIds": [], "failures": []}
         pytest.fail("Unexpected cleanup operation")
 
@@ -253,5 +268,116 @@ def test_cleanup_empties_only_the_two_matching_repository_ids(images, foreign):
         images.empty_repositories(SimpleNamespace(aws=aws), outputs, [])
         assert [a[3] for a in calls if a[:2] == ("ecr", "list-images")] == [
             "strawhats-midterm/iris",
+            "strawhats-midterm/iris",
+            "strawhats-midterm/operator",
             "strawhats-midterm/operator",
         ]
+
+
+@pytest.fixture
+def cleanup_registry():
+    index, child = "sha256:" + "b" * 64, "sha256:" + "a" * 64
+    outputs = {
+        "RepositoryName": "strawhats-midterm/iris",
+        "OperatorRepositoryName": "strawhats-midterm/operator",
+    }
+    state = SimpleNamespace(
+        remaining={name: [child, index] for name in outputs.values()},
+        calls=[],
+        deletes=[],
+        index=index,
+        child=child,
+        index_media="application/vnd.oci.image.index.v1+json",
+        failure=None,
+        missing_index=False,
+        refuse_child=False,
+    )
+
+    def aws(*argv):
+        state.calls.append(argv)
+        repository = argv[argv.index("--repository-name") + 1]
+        remaining = state.remaining[repository]
+        if argv[:2] == ("ecr", "describe-images"):
+            return {
+                "imageDetails": [
+                    {
+                        "imageDigest": digest,
+                        "imageManifestMediaType": state.index_media
+                        if digest == index
+                        else "application/vnd.oci.image.manifest.v1+json",
+                    }
+                    for digest in remaining
+                ]
+            }
+        if argv[:2] == ("ecr", "list-images"):
+            return {"imageIds": [{"imageDigest": d} for d in remaining]}
+        if argv[:2] == ("ecr", "batch-delete-image"):
+            requested = json.loads(argv[argv.index("--image-ids") + 1])
+            state.deletes.append((repository, requested))
+            failures = []
+            for image in requested:
+                digest = image["imageDigest"]
+                error = state.failure
+                if digest == child and index in remaining:
+                    error = "ImageReferencedByManifestList"
+                elif state.missing_index and digest == index:
+                    remaining.remove(index)
+                    error = "ImageNotFound"
+                if error:
+                    failures.append({"imageId": image, "failureCode": error})
+                elif not (state.refuse_child and digest == child):
+                    remaining.remove(digest)
+            return {"imageIds": [], "failures": failures}
+        pytest.fail("Unexpected cleanup operation")
+
+    return state, SimpleNamespace(aws=aws), outputs
+
+
+@pytest.mark.parametrize(
+    "media_type",
+    [
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+    ],
+)
+def test_cleanup_removes_manifest_indexes_before_referenced_children(
+    images, cleanup_registry, media_type
+):
+    state, cloud, outputs = cleanup_registry
+    state.index_media = media_type
+    images.empty_repositories(cloud, outputs, [])
+    assert all(not remaining for remaining in state.remaining.values())
+    assert all(
+        requested == [{"imageDigest": state.index}]
+        for _, requested in state.deletes[::2]
+    )
+
+
+def test_cleanup_verifies_no_images_remain_after_successful_delete_response(
+    images, cleanup_registry
+):
+    state, cloud, outputs = cleanup_registry
+    state.remaining = {name: [state.child] for name in outputs.values()}
+    state.refuse_child = True
+    with pytest.raises(RuntimeError, match="remain"):
+        images.empty_repositories(cloud, outputs, [])
+
+
+def test_cleanup_accepts_missing_index_only_with_final_empty_confirmation(
+    images, cleanup_registry
+):
+    state, cloud, outputs = cleanup_registry
+    state.missing_index = True
+    images.empty_repositories(cloud, outputs, [])
+    assert all(not remaining for remaining in state.remaining.values())
+
+
+@pytest.mark.parametrize("failure", ["AccessDenied", "ImageReferencedByManifestList"])
+def test_cleanup_never_retries_an_unrecognized_deletion_failure(
+    images, cleanup_registry, failure
+):
+    state, cloud, outputs = cleanup_registry
+    state.failure = failure
+    with pytest.raises(RuntimeError, match="partially failed"):
+        images.empty_repositories(cloud, outputs, [])
+    assert len(state.deletes) == 1
