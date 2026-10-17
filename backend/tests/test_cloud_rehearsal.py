@@ -221,7 +221,10 @@ def test_cleanup_discovery_lists_real_resources_once_and_skips_sdk_list_wrappers
     )
     objects = object.__new__(runtime.install.RuntimeObjects)
     objects.dynamic = SimpleNamespace(
-        resources=SimpleNamespace(search=lambda **kwargs: [wrapper, actual])
+        resources=SimpleNamespace(
+            invalidate_cache=lambda: None,
+            search=lambda **kwargs: [wrapper, actual],
+        )
     )
     assert objects.children("strawhats") == [child]
     assert calls == [{"namespace": "strawhats", "_request_timeout": 5}]

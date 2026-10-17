@@ -296,6 +296,42 @@ def publish_runtime(cloud) -> ReleaseImages:
     return result
 
 
+def _image_ids(entries):
+    if not isinstance(entries, list) or any(
+        not isinstance(entry, dict)
+        or not isinstance(entry.get("imageDigest"), str)
+        or not re.fullmatch(DIGEST, entry["imageDigest"])
+        for entry in entries
+    ):
+        raise RuntimeError("Image cleanup metadata is invalid; stack deletion stopped.")
+    return [
+        {"imageDigest": digest}
+        for digest in dict.fromkeys(entry["imageDigest"] for entry in entries)
+    ]
+
+
+def _delete_images(cloud, repository, images):
+    for start in range(0, len(images), 100):
+        batch = images[start : start + 100]
+        result = cloud.aws(
+            "ecr",
+            "batch-delete-image",
+            "--repository-name",
+            repository,
+            "--image-ids",
+            json.dumps(batch),
+        )
+        requested = {image["imageDigest"] for image in batch}
+        if any(
+            failure.get("failureCode") != "ImageNotFound"
+            or failure.get("imageId", {}).get("imageDigest") not in requested
+            for failure in result.get("failures", [])
+        ):
+            raise RuntimeError(
+                "Image cleanup partially failed; stack deletion stopped."
+            )
+
+
 def empty_repositories(cloud, outputs, resources):
     repositories = []
     for output, logical, expected in (
@@ -319,19 +355,28 @@ def empty_repositories(cloud, outputs, resources):
         if actual:
             repositories.append(actual)
     for repository in repositories:
-        images = cloud.aws("ecr", "list-images", "--repository-name", repository)[
-            "imageIds"
+        details = cloud.aws("ecr", "describe-images", "--repository-name", repository)[
+            "imageDetails"
         ]
-        for start in range(0, len(images), 100):
-            result = cloud.aws(
-                "ecr",
-                "batch-delete-image",
-                "--repository-name",
-                repository,
-                "--image-ids",
-                json.dumps(images[start : start + 100]),
-            )
-            if result.get("failures"):
-                raise RuntimeError(
-                    "Image cleanup partially failed; stack deletion stopped."
-                )
+        _image_ids(details)
+        indexes = _image_ids(
+            [
+                image
+                for image in details
+                if image.get("imageManifestMediaType")
+                in {
+                    "application/vnd.oci.image.index.v1+json",
+                    "application/vnd.docker.distribution.manifest.list.v2+json",
+                }
+            ]
+        )
+        # Remove manifest references first, then refresh instead of replaying stale IDs.
+        _delete_images(cloud, repository, indexes)
+        remaining = _image_ids(
+            cloud.aws("ecr", "list-images", "--repository-name", repository)["imageIds"]
+        )
+        if any(image in indexes for image in remaining):
+            raise RuntimeError("Manifest indexes remain; stack deletion stopped.")
+        _delete_images(cloud, repository, remaining)
+        if cloud.aws("ecr", "list-images", "--repository-name", repository)["imageIds"]:
+            raise RuntimeError("Repository images remain; stack deletion stopped.")

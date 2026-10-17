@@ -524,6 +524,8 @@ class RuntimeObjects:
         doc = record.document()
         current = self.get(doc)
         if current is None:
+            if record.kind == "CustomResourceDefinition":
+                self.dynamic.resources.invalidate_cache()
             return
         if current["metadata"].get("uid") != record.uid:
             raise RuntimeError("Deletion UID changed.")
@@ -545,6 +547,8 @@ class RuntimeObjects:
         while time.monotonic() < deadline:
             current = self.get(doc)
             if current is None:
+                if record.kind == "CustomResourceDefinition":
+                    self.dynamic.resources.invalidate_cache()
                 return
             if current["metadata"].get("uid") != record.uid:
                 raise RuntimeError("An object was recreated during cleanup.")
@@ -619,6 +623,9 @@ class RuntimeObjects:
         return resource.get(_request_timeout=5).to_dict().get("items", [])
 
     def children(self, namespace):
+        # The SDK persists discovery across processes, including removed CRDs.
+        # Refresh before the initial guard as well as resumed namespace checks.
+        self.dynamic.resources.invalidate_cache()
         children = []
         for api in self.dynamic.resources.search(namespaced=True):
             if (
@@ -628,9 +635,24 @@ class RuntimeObjects:
                 or api.group == "metrics.k8s.io"
             ):
                 continue
-            children.extend(
-                api.get(namespace=namespace, _request_timeout=5)
-                .to_dict()
-                .get("items", [])
-            )
+            for attempt in range(3):
+                try:
+                    response = api.get(namespace=namespace, _request_timeout=5)
+                except ApiException as error:
+                    if error.status != 429 or attempt == 2:
+                        raise
+                    retry_after = next(
+                        (
+                            value
+                            for name, value in (error.headers or {}).items()
+                            if name.lower() == "retry-after"
+                        ),
+                        None,
+                    )
+                    if retry_after not in ("1", "2", "3", "4", "5"):
+                        raise
+                    time.sleep(int(retry_after))
+                else:
+                    children.extend(response.to_dict().get("items", []))
+                    break
         return children
