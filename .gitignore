@@ -18,6 +18,7 @@ test-results/
 # Keep working plans, review notes, and teammate handoffs local.
 /docs/*
 !/docs/api-contract.md
+!/docs/project-overview.md
 /plans/
 /notes/
 *.log

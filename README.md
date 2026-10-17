@@ -6,7 +6,9 @@ A model operations dashboard for registering ML models, testing inference, prepa
 
 **Live demo:** [strawhats-mlops.vercel.app](https://strawhats-mlops.vercel.app)
 
-**Status:** the public standalone dashboard computes real browser predictions and exports Kubernetes previews without a backend. The connected local dashboard supports verified Iris deployment, scaling, rollback, inference and monitoring on Docker Desktop. The owner-run bounded AI resource-adjustment command is implemented; its acceptance results are documented below. AWS deployment and the complete cloud demonstration remain unfinished.
+**Status:** the public standalone dashboard computes real browser predictions and exports Kubernetes previews without a backend. On October 17, 2026, the private owner workspace verified the Iris operator on AWS EKS: deployment, Service inference, scaling, latest-snapshot rollback, monitoring, warning firing/recovery and one real LangChain-selected resource adjustment. The recorded demonstration below shows those actual results.
+
+**Cleanup verified:** The temporary Kubernetes runtime and AWS project stack were removed after the October 17 recording. Independent checks verified that the worker, captured boot disk, network interfaces, addresses, VPC, image repositories and project roles are absent. The temporary deployer and its project policies were also removed. The public Vercel site still computes real predictions; the recording preserves the completed cloud demonstration.
 
 ## Team
 
@@ -18,6 +20,8 @@ A model operations dashboard for registering ML models, testing inference, prepa
 
 Each teammate reviews, tests, and commits their contributions through feature branches and pull requests.
 
+Mikayla's merged work is recorded in [PR 3](https://github.com/GreatlyDev/StrawHats-MLOps/pull/3) and [PR 10](https://github.com/GreatlyDev/StrawHats-MLOps/pull/10); Mahki's is in [PR 4](https://github.com/GreatlyDev/StrawHats-MLOps/pull/4) and [PR 9](https://github.com/GreatlyDev/StrawHats-MLOps/pull/9). Their original commits and source branches are preserved.
+
 ## Features in this release
 
 - One Piece-inspired responsive React dashboard with parchment panels, nautical branding, and Overview, Models, Deployments, Assistant, and Activity.
@@ -28,36 +32,66 @@ Each teammate reviews, tests, and commits their contributions through feature br
 - Read-only cluster reachability check that reports the actual local context.
 - Observed prediction counts/latency and Prometheus endpoints.
 - LangChain/OpenAI guidance with server-only credentials and actionable provider errors.
-- Standalone Iris model service verified in a hardened Linux container.
-- Namespaced Python Kubernetes operator with a bounded ModelDeployment CRD, verified local scaling and explicit rollback; see [local operator setup](infra/kubernetes/operator/README.md).
+- Iris model service verified in a hardened Linux container and AWS Kubernetes.
+- Namespaced Python Kubernetes operator with a bounded ModelDeployment CRD, verified scaling and explicit rollback; see [local operator setup](infra/kubernetes/operator/README.md).
 - Opt-in private Iris dashboard controls, bound to one configured local/rehearsal/EKS release; accepted requests remain Pending until the operator observes the change.
-- Deployed Iris predictions through the fixed local Kubernetes Service, with measured probabilities, model latency, and deployment provenance.
-- Local Iris serving telemetry, one provisioned Prometheus/Grafana dashboard, Kubernetes pod resource readings and a bounded prediction-concentration warning demo; see [local monitoring setup](infra/kubernetes/monitoring/README.md).
+- Deployed Iris predictions through the selected private Kubernetes Service, with measured probabilities, model latency, and deployment provenance.
+- Iris serving telemetry, one provisioned Prometheus/Grafana dashboard, Kubernetes pod resource readings and a bounded prediction-concentration warning demo; see [local monitoring setup](infra/kubernetes/monitoring/README.md).
+- One owner-run LangChain/OpenAI command that selects a permitted CPU or memory step from real measurements and verifies the resulting rollout and inference.
 
 Container registrations store metadata. The name/version Iris classifier v1.0.0 is reserved for the built-in example. Local inference supports the bundled Iris example; external images require a separately deployed endpoint. Previews do not apply workloads to a cluster.
 
 The [owner release guide](infra/README.md) covers the CI-gated two-image release,
 private runtime selection, dedicated local rehearsal and UID-checked cleanup.
-Cloud preparation and simulated provider tests do not establish live AWS or live
-AI acceptance; those remain required before claiming the assignment complete.
+For a plain-language explanation of the model, Kubernetes and the two dashboard
+modes, read [What this project does](docs/project-overview.md).
+
+## Verified AWS demonstration — October 17, 2026
+
+One EKS 1.35 cluster in Northern Virginia used one `t3.medium` worker. Model and
+operator images were published from source
+`5d4e667d02ce7247ecfc2172a8b350ff4826f691`, after successful
+[main CI](https://github.com/GreatlyDev/StrawHats-MLOps/actions/runs/38978082378).
+These are observed acceptance results, not availability or performance guarantees.
+
+| Check | Observed result |
+| --- | --- |
+| Installation and inference | All 29 runtime objects installed; exact owned Iris generation 1 reached Ready with one replica and served a valid setosa prediction. |
+| Scaling | Generation 2 reached two ready replicas with two owned healthy Pods and matching Service endpoints. |
+| Latest-snapshot rollback | An initial request returned 503 without changing Iris. A later retried request reached generation 3, RolledBack with two ready replicas. The latest verified snapshot already contained two replicas. |
+| Warning firing and recovery | 345 real Service predictions over 198.19 seconds verified inactive → firing → inactive. At firing, setosa represented 100% of recent predictions; recovery was observed below the 90% threshold. |
+| Monitoring | Metrics-server/Prometheus returned real readings. Grafana showed Available telemetry, two discovered Iris targets, prediction distributions and actual serving CPU/resident-memory charts. |
+| Bounded AI adjustment | One genuine LangChain/OpenAI call selected CPU 250m → 100m per replica. Memory 256Mi, image and two replicas were preserved; the original Iris UID reached generation 4/Ready2 and served setosa with probability 0.9808. |
+
+Grafana initially used the local monitoring namespace in its datasource. A
+separate renderer fix, `f1ca54c`, corrected the existing ConfigMap and restarted
+Grafana; actual browser charts were then verified. The model/operator image
+source remains `5d4e667`; those images were not rebuilt from the configuration fix.
+
+The owner approved at most $15 of AWS usage, including credits, within October 17
+noon to October 18 noon EDT. This allowance is not a spending cap or automatic
+shutdown. Final billed usage is not yet settled. Final
+owner review, professor repository-access confirmation and course submission
+remain; no additional application features are needed.
 
 ## Architecture
 
 ```text
-React / TypeScript / Vite dashboard
-             │ /api (local Vite proxy)
-             ▼
-FastAPI ── SQLite + local trained artifact
-  ├── model registry, inference, measured metrics
-  ├── Kubernetes YAML preview + read-only kubectl health
-  ├── Local Iris bridge → docker-desktop ModelDeployment + Iris Service inference
-  └── LangChain ── OpenAI (only on assistant submission)
+Public Vercel site
+  React portfolio + exported Iris parameters
+    → real browser inference, YAML previews and session Activity
 
-Standalone model service: /health, /predict, /metrics
-Local Kubernetes: ModelDeployment CRD → Python operator → Iris Deployment/Service
-Local monitoring: Iris /metrics → Prometheus → Grafana + concentration alert
-Standalone portfolio: exported Iris → browser inference + session YAML previews
-Owner tools: bounded LangChain adjustment + CI-gated cloud release preparation
+Private owner workspace on loopback
+  React workspace → FastAPI → SQLite + local trained artifact
+                    ├── registry, workspace inference and saved previews
+                    ├── LangChain/OpenAI deployment guidance
+                    └── verified local/rehearsal/EKS target
+                          → ModelDeployment CRD → Python operator
+                            → Iris Deployment/Service → real predictions
+                            → Prometheus + metrics-server → Grafana/warning
+
+Owner CLI → real metrics → bounded LangChain choice → one verified resource change
+Model service endpoints: /health, /predict, /metrics
 ```
 
 The connected dashboard does not receive provider keys. Its local records and trained artifacts live in `.local/`, which is excluded from Git. Prometheus counters reset with the process; workspace totals persist in SQLite. Median latency covers the last 30 recorded predictions.
@@ -68,11 +102,11 @@ The mode is chosen explicitly when Vite starts or builds. `VITE_APP_MODE` defaul
 
 | Feature | `workspace` | `portfolio` |
 | --- | --- | --- |
-| Iris predictions | Trained backend artifact; deployed model in Local Iris | Real computation in the browser using exported parameters |
+| Iris predictions | Trained backend artifact; deployed model in the selected private Iris panel | Real computation in the browser using exported parameters |
 | Models | Persistent registry and training | One prepared Iris example; no training or registration |
 | YAML previews | Saved in SQLite; copy/download | Up to 50 saved per page session; copy/download |
 | Overview and Activity | Backend records and measured workspace predictions | Actual browser actions; last 30 predictions and 50 events |
-| Kubernetes and monitoring | Connected local operator and serving telemetry | Unavailable; previews make no cluster changes |
+| Kubernetes and monitoring | Connected owner operator and serving telemetry | Unavailable; previews make no cluster changes |
 | AI assistant | Server-side provider configuration required | Unavailable; no prompts or provider requests |
 
 Portfolio state is held in memory for the current page session. Navigation within the dashboard preserves it; reload or opening a new page starts over. Latency measures computation on the visitor's device, not a network round trip. Browser mode does not connect to the API, Kubernetes or an AI provider.
@@ -109,7 +143,7 @@ This also maintains the independent backend YAML oracle used by preview tests. T
 
 ## Requirements and setup
 
-Use Python 3.12 and Node 24 (or Node 22.12+). Docker and kubectl are optional for this local release and required for later container/cluster verification.
+Use Python 3.12 and Node 24 (or Node 22.12+). Docker and kubectl are required for container/cluster operations; workspace registry, local inference and previews can run without them.
 
 From the repository root on Windows:
 
@@ -149,14 +183,24 @@ Open [the dashboard](http://127.0.0.1:5173) and [API documentation](http://127.0
 5. Open Overview/Activity to see real counts and recorded events.
 6. Submit a deployment question in Assistant when API credits are available.
 
-For Iris, features are sepal length, sepal width, petal length, and petal width in centimeters. The bundled [scikit-learn Iris dataset](https://scikit-learn.org/1.7/datasets/toy_dataset.html#iris-plants-dataset) has 150 observations and 3 classes. A stratified split uses 120 training and 30 held-out test samples with seed 42. StandardScaler is fitted inside the training pipeline; logistic regression is evaluated on the held-out samples. These scores describe this educational dataset, not production model quality.
+## Dataset, model and evaluation
+
+Iris features are sepal length, sepal width, petal length, and petal width in centimeters. The bundled [scikit-learn Iris dataset](https://scikit-learn.org/1.7/datasets/toy_dataset.html#iris-plants-dataset) has 150 observations and 3 classes. A stratified split uses 120 training and 30 held-out test samples with seed 42. StandardScaler is fitted inside the training pipeline; logistic regression is evaluated on the held-out samples.
+
+| Held-out metric | Result |
+| --- | --- |
+| Accuracy | 0.9333 |
+| Macro F1 | 0.9333 |
+
+These scores describe this educational dataset, not production model quality.
+Setosa, versicolor and virginica are three answers from this one classifier.
 
 ## Verification
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest backend/tests -q --disable-plugin-autoload
-.\.venv\Scripts\python.exe -m ruff check backend scripts/cloud scripts/monitoring scripts/portfolio
-.\.venv\Scripts\python.exe -m ruff format --check backend scripts/cloud scripts/monitoring scripts/portfolio
+.\.venv\Scripts\python.exe -m ruff check backend scripts/cloud scripts/monitoring scripts/optimization scripts/portfolio
+.\.venv\Scripts\python.exe -m ruff format --check backend scripts/cloud scripts/monitoring scripts/optimization scripts/portfolio
 .\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe -m scripts.portfolio.export_iris --check
 cd frontend
@@ -179,7 +223,8 @@ Tests exercise persistence, input rejection, real predictions, manifest contents
 Install the [local operator](infra/kubernetes/operator/README.md), including the
 verified `strawhats-iris:local-monitoring` image. Install
 `backend/requirements-operator.txt` in the backend environment. Set
-`LOCAL_OPERATOR_ENABLED=1` in `.env.local` and restart the backend, then open
+`OWNER_CLUSTER_TARGET=local` and `LOCAL_OPERATOR_ENABLED=1` in `.env.local`,
+then restart the backend and open
 **Deployments → Local Iris**.
 
 - **Deploy Iris** creates or updates `iris` using the verified image, selected
@@ -187,7 +232,7 @@ verified `strawhats-iris:local-monitoring` image. Install
 - **Scale Iris** changes 1–2 replicas only after the requested configuration is
   verified ready. Scaling after rollback preserves the restored image/resources.
 - **Rollback Iris** requests the operator's most recent verified snapshot. It
-  restores that snapshot after a failed rollout; each successful configuration
+  can restore that snapshot after a failed rollout; each successful configuration
   replaces the snapshot.
 - **Predict with deployed Iris** sends four flower measurements in centimeters
   through the Kubernetes API proxy to the owned `iris:8000` Service. It requires
@@ -274,13 +319,15 @@ configuration; the command's evidence retains the pre-adjustment settings.
 Local automated acceptance covers policy thresholds, real LangChain request
 serialization, concurrency conflicts, invalid/stale observations, bounded waits,
 failed rollouts and guarded restoration through controlled external transports.
-On October 15, 2026, 60 genuine balanced Service predictions produced healthy
-two-pod telemetry and an eligible CPU decrease from 250m to 100m. The single live
-OpenAI preview request was rate-limited, so no adjustment was applied and no second
-provider call was made. **Live AI-selected adjustment/readiness acceptance remains
-pending.** Restoration/conflict behavior is verified in automated transport tests,
-not by deliberately breaking the running cluster. The public dashboard remains
-independent of this provider and local cluster.
+Earlier live attempts were rejected before applying a change. On October 17,
+after provider access and local connectivity were restored, one genuine call
+selected CPU 250m → 100m on the original Docker Desktop Iris resource. Generation
+10 reached two ready replicas and served a valid prediction, preserving image,
+memory and replicas. The separate real EKS acceptance above verified the same
+bounded CPU step at generation 4. Restoration/conflict behavior is verified in
+automated transport tests, not by deliberately breaking the running cluster.
+The command is owner-run and adds no continuous autoscaler. The public dashboard
+remains independent of the AI provider and cluster.
 
 Build from the repository root after starting Docker:
 
@@ -291,13 +338,13 @@ docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m,uid=10001,gid
 .\.venv\Scripts\python.exe -m scripts.cloud.smoke --base-url http://127.0.0.1:8001
 ```
 
-The model image runs as UID 10001 and exposes `/health`, `/predict`, and `/metrics` on port 8000. On October 11, 2026, the Linux/amd64 image passed real prediction, input rejection, and metrics checks before and after a container restart under these security and resource limits. Observed memory use was approximately 96 MiB. Held-out accuracy and macro F1 were both 0.9333; the sample above predicted setosa with confidence 0.9808. These are local observations; AWS deployment remains pending.
+The model image runs as UID 10001 and exposes `/health`, `/predict`, and `/metrics` on port 8000. On October 11, 2026, the Linux/amd64 image passed real prediction, input rejection, and metrics checks before and after a container restart under these security and resource limits. Observed memory use was approximately 96 MiB. Held-out accuracy and macro F1 were both 0.9333; the sample above predicted setosa with confidence 0.9808. These container figures are dated local observations; separate cloud acceptance appears above.
 
 The fixed one-replica workload in `infra/kubernetes/iris` renders with `kubectl kustomize infra/kubernetes/iris`. Use an immutable registry digest before applying it to a cloud cluster.
 
-The [EKS release instructions](infra/README.md) cover the prepared one-worker AWS template and guarded Python commands. Cloud creation is deferred until the presentation window and usage budget are approved. No AWS runtime or Kubernetes model-serving endpoint is verified yet.
+The [EKS release instructions](infra/README.md) cover the one-worker AWS template and guarded Python commands used for cloud acceptance. The owner release uses the CRD/operator; the fixed raw Deployment manifest is an earlier container example. A future cloud run needs its own approved window and verified named non-root access.
 
-`backend/Dockerfile` is a separate orchestrator API image. It needs persistent storage for `/app/.local` and runtime environment secrets. It does not include kubectl. Do not deploy the current management API publicly until authentication/authorization, request budgets, shared persistence, and production CORS are implemented.
+`backend/Dockerfile` is a separate orchestrator API image. It needs persistent storage for `/app/.local` and runtime environment secrets and does not include kubectl. This release keeps the management API in the owner's loopback-only workspace; the public deployment serves the portfolio frontend.
 
 The public Vercel project uses `frontend` as its root directory, Vite, Node.js 24, `npm ci`, `npm run build`, and output directory `dist`. Set `VITE_APP_MODE=portfolio` and leave `VITE_API_BASE_URL` empty or unset. This build needs no running backend or cluster. Only public configuration belongs in Vite variables; provider credentials stay on the server. Kubernetes controls remain in the owner's connected workspace. The Kubernetes operator and model workloads run in Kubernetes.
 
@@ -315,11 +362,19 @@ Commit source, tests, maintained documentation, dependency lock files, build con
 
 Open [the public standalone demo](https://strawhats-mlops.vercel.app). No sign-in is required. In **Models**, run the default Iris input for setosa, then try `[6.7, 3.0, 5.2, 2.3]` for virginica. In **Deployments**, enter a draft serving-image reference, generate a preview, and copy or download its YAML. **Activity** records those actual browser actions; reload starts a fresh session.
 
-The following GIF sequences actual screenshots captured from the public site on October 15, 2026: real predictions, an exported preview, session Activity and measured Overview counts. It shows the standalone workflow; AWS deployment, live cluster operations and automated AI adjustment are not demonstrated in this recording.
+The following 75-second GIF sequences 17 actual screenshots captured on October
+17, 2026: public browser predictions/session Activity, the real AWS cluster and
+worker, deployed inference, observed scaling/rollback, warning states and Grafana
+charts. The last two frames are clearly labeled owner-generated reports from the
+actual saved AI verification; they are not AWS console or dashboard screens.
+The GIF records past results and does not establish current cloud availability.
 
-![Public standalone Iris predictions, YAML preview and session Activity](assets/demo.gif)
+![Recorded public Iris workflow and verified AWS deployment, monitoring and bounded AI adjustment](assets/demo.gif)
 
-The connected workspace remains available locally at `http://127.0.0.1:5173` using the setup above. The full cloud demonstration will be recorded after EKS deployment and its acceptance checks pass. The public site remains useful when that temporary cluster is shut down.
+The connected workspace runs locally at `http://127.0.0.1:5173` using the setup
+above; its cluster actions require a running configured target. The public site
+continues to provide real browser predictions and export-only previews after the
+temporary cluster is shut down. See the cleanup status above.
 
 ## License
 
